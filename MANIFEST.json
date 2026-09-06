@@ -1,0 +1,15 @@
+{
+  "root": "lianghua",
+  "baseline": {
+    "java": "17",
+    "spring_boot": "4.1.1",
+    "langchain4j": "1.20.0",
+    "langgraph4j": "1.8.26"
+  },
+  "days": 20,
+  "learn_prompts": 20,
+  "engineering_prompts": 20,
+  "spec_files": 80,
+  "dual_prompt": true,
+  "vertical_evolution": true
+}
