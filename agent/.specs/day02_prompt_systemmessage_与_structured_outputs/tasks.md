@@ -1,13 +1,13 @@
 # Day 2 Tasks
 
-- [ ] Confirm current API from official docs/Javadoc.
-- [ ] Implement domain contract.
-- [ ] Implement infrastructure adapter/node/tool.
-- [ ] Wire the application path.
-- [ ] Add normal-path JUnit 5 test.
-- [ ] Add error/boundary JUnit 5 test.
-- [ ] Run `mvn test`.
-- [ ] Update README/checklist with observed results.
+- [x] Confirm current API from official docs/Javadoc.
+- [x] Implement domain contract.
+- [x] Implement infrastructure adapter/node/tool.
+- [x] Wire the application path.
+- [x] Add normal-path JUnit 5 test.
+- [x] Add error/boundary JUnit 5 test.
+- [x] Run `mvn test`.
+- [x] Update README/checklist with observed results.
 
 ## Vertical Evolution Contract
 

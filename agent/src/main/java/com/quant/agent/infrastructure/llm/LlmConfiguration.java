@@ -1,6 +1,8 @@
 package com.quant.agent.infrastructure.llm;
 
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -13,6 +15,19 @@ public class LlmConfiguration {
     @Bean
     public StreamingChatModel streamingChatModel(LlmProperties properties) {
         return OpenAiStreamingChatModel.builder()
+                .apiKey(properties.getApiKey())
+                .baseUrl(properties.getBaseUrl())
+                .modelName(properties.getModelName())
+                .build();
+    }
+
+    /**
+     * 非流式 LLM：用于 Structured Output。
+     * 必须拿到完整 JSON 才能反序列化，不能使用流式。
+     */
+    @Bean
+    public ChatModel chatLanguageModel(LlmProperties properties) {
+        return OpenAiChatModel.builder()
                 .apiKey(properties.getApiKey())
                 .baseUrl(properties.getBaseUrl())
                 .modelName(properties.getModelName())
