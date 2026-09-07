@@ -14,6 +14,10 @@ SystemMessage、UserMessage、AiServices、POJO/record、JSON Schema/Prompt fall
 ## Definition of Done
 See checklist.md.
 
+## 演进任务 E1：原生 Structured Output
+
+将当前"prompt 文字约束 + retry 兜底"升级为 LangChain4j 1.20 原生 `ResponseFormat + JsonSchema`，让模型 API 强制输出符合 Schema 的 JSON。详见 tasks.md E1。
+
 ## Vertical Evolution Contract
 
 ### Capability

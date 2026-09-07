@@ -38,6 +38,39 @@ BUILD SUCCESS
 - `application.yml` 中存在硬编码 API Key（同 Day 1），建议迁移为 `${QUANT_LLM_API_KEY}` 环境变量占位符。
 - `SystemMessage` 目前硬编码在接口中，后续可考虑外部化到配置。
 
+## 演进任务
+
+### E1：原生 Structured Output — 已完成 ✅
+
+**完成时间**：2026-09-07
+
+**改动文件**：
+- `infrastructure/llm/LlmConfiguration.java`：新增 `stockAnalysisResponseFormat()`，配置 `ResponseFormat + JsonSchema`，在 `OpenAiChatModel.builder().responseFormat(...)` 应用
+- `application/llm/StockAnalysisAiService.java`：精简 SYSTEM_PROMPT，移除 JSON Schema 描述（API 已强制约束）
+
+**升级效果**：
+
+| 维度 | Before（prompt 软约束） | After（API 硬约束） |
+|---|---|---|
+| 约束方式 | prompt 文字"请按 JSON 格式返回" | `ResponseFormatBuilder().jsonSchema(...)` 下发到模型 API |
+| 结构保证 | 无保证，靠 retry 兜底 | API 强制输出符合 Schema 的 JSON |
+| 等价于 | —— | Spring AI `.entity(StockAnalysis.class)` |
+
+**测试证据**：
+```
+Tests run: 6, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+- Day 1 回归：`Day01QuantLlmServiceTest` 2/2 通过
+- Day 2：`Day02StructuredAnalysisServiceTest` 4/4 通过
+
+**关键认知**：
+- LangChain4j 1.20 的原生结构化输出 = `ResponseFormat`（指定 JSON 类型 + `JsonSchema`）
+- `JsonSchema` 由 `JsonObjectSchema` 构建：`addEnumProperty`、`addStringProperty`、`addNumberProperty`、`required`、`additionalProperties(false)`
+- 配置位置：`OpenAiChatModel.builder().responseFormat(...)` —— 在**模型层**而非 AiServices 层
+
+## Vertical Evolution Contract
+
 ## Vertical Evolution Contract
 
 ### Capability
