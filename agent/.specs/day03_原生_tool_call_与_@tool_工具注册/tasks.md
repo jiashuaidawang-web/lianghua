@@ -1,13 +1,24 @@
 # Day 3 Tasks
 
-- [ ] Confirm current API from official docs/Javadoc.
-- [ ] Implement domain contract.
-- [ ] Implement infrastructure adapter/node/tool.
-- [ ] Wire the application path.
-- [ ] Add normal-path JUnit 5 test.
-- [ ] Add error/boundary JUnit 5 test.
-- [ ] Run `mvn test`.
-- [ ] Update README/checklist with observed results.
+- [x] Confirm current API from official docs/Javadoc.
+- [x] Implement domain contract.
+- [x] Implement infrastructure adapter/node/tool.
+- [x] Wire the application path.
+- [x] Add normal-path JUnit 5 test.
+- [x] Add error/boundary JUnit 5 test.
+- [x] Run `mvn test`.
+- [x] Update README/checklist with observed results.
+
+## 实现说明
+
+### 新增文件
+- `application/tool/StockTools.java` —— @Tool 工具类（getStockPrice、getFundamental）
+- `application/llm/StockAnalysisWithToolAiService.java` —— 支持工具调用的 AiService 接口
+- `interfaces/http/StockToolController.java` —— 工具调用端点 `/api/v1/tool/analyze/{symbol}`
+- `test/.../Day03StockToolsTest.java` —— 工具方法单元测试
+
+### 修改文件
+- `infrastructure/llm/AiServicesConfiguration.java` —— 新增 `stockAnalysisWithToolAiService` Bean，注入 `.tools(stockTools)`
 
 ## Vertical Evolution Contract
 

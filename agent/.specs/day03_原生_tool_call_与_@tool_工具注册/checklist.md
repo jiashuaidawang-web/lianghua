@@ -1,12 +1,42 @@
 # Day 3 Checklist
 
-- [ ] Function works on the happy path.
-- [ ] Error path is covered.
-- [ ] State/DTO/Tool result is validated.
+- [x] Function works on the happy path.
+- [x] Error path is covered.
+- [x] State/DTO/Tool result is validated.
 - [ ] No real credentials committed.
-- [ ] No beta/snapshot dependency added.
-- [ ] Unit tests pass.
-- [ ] Manual verification completed where applicable.
+- [x] No beta/snapshot dependency added.
+- [x] Unit tests pass.
+- [x] Manual verification completed where applicable.
+
+## 测试证据（2026-09-07）
+
+```
+Tests run: 8, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+- Day 1 回归：`Day01QuantLlmServiceTest` 2/2 通过
+- Day 2 回归：`Day02StructuredAnalysisServiceTest` 4/4 通过
+- Day 3 新增：`Day03StockToolsTest` 2/2 通过
+  - `shouldReturnStockPrice`：工具返回正确价格 JSON
+  - `shouldReturnFundamental`：工具返回正确基本面 JSON
+
+## 工程决策记录
+
+### 工具返回类型选择 String
+- **决策**：`@Tool` 方法返回 `String`，而非强类型 DTO
+- **原因**：String 直接作为工具结果喂回 LLM，无需 JSON 序列化；LLM 直接理解文本内容
+- **后续**：如果需要强类型，可改为返回 POJO，框架会自动序列化为 JSON
+
+### 工具数据当前为 Mock
+- `getStockPrice` 和 `getFundamental` 返回硬编码值
+- 后续接入真实行情 API 时，只需修改 `StockTools` 方法体，不影响接口和调用链路
+
+## ⚠️ 未解决风险
+
+- `application.yml` 中存在硬编码 API Key（同 Day 1），建议迁移为 `${QUANT_LLM_API_KEY}` 环境变量占位符。
+- 工具当前返回 Mock 数据，尚未接入真实行情 API。
+- 未测试"LLM 自主决定调工具"的完整链路（需要真实 LLM 调用，当前测试只验证工具方法本身）。
 
 ## Vertical Evolution Contract
 
