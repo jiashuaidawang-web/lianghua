@@ -3,6 +3,11 @@ package com.quant.agent.infrastructure.llm;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
 import com.quant.agent.application.tool.StockTools;
+import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.OutputNode;
+import com.quant.agent.graph.nodes.ToolNode;
+import com.quant.agent.graph.runtime.GraphRunner;
+import com.quant.agent.graph.topology.QuantAgentStateGraph;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.springframework.context.annotation.Bean;
@@ -35,5 +40,35 @@ public class AiServicesConfiguration {
                 .chatModel(chatLanguageModel)
                 .tools(stockTools)
                 .build();
+    }
+
+    // ---- Day 04: Graph Runtime Beans ----
+
+    @Bean
+    public AnalysisNode analysisNode(StockAnalysisAiService stockAnalysisAiService) {
+        return new AnalysisNode(
+                new com.quant.agent.application.llm.StructuredAnalysisService(stockAnalysisAiService));
+    }
+
+    @Bean
+    public ToolNode toolNode(StockTools stockTools) {
+        return new ToolNode(stockTools);
+    }
+
+    @Bean
+    public OutputNode outputNode() {
+        return new OutputNode();
+    }
+
+    @Bean
+    public QuantAgentStateGraph quantAgentStateGraph(AnalysisNode analysisNode,
+                                                     ToolNode toolNode,
+                                                     OutputNode outputNode) {
+        return new QuantAgentStateGraph(analysisNode, toolNode, outputNode);
+    }
+
+    @Bean
+    public GraphRunner graphRunner(QuantAgentStateGraph quantAgentStateGraph) {
+        return new GraphRunner(quantAgentStateGraph);
     }
 }
