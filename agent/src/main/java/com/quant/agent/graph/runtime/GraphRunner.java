@@ -66,46 +66,56 @@ public class GraphRunner {
     }
 
     /**
-     * 执行图，返回最终状态。
+     * 执行 Day 4 图（固定流程），返回最终状态。
      *
      * @param symbol 股票代码
      * @return 最终 State（含 finalResult）
      * @throws IllegalStateException 图执行无输出
      */
-    public QuantAgentState run(String symbol) {
-        log.info("GraphRunner 启动: symbol={}", symbol);
+    public QuantAgentState runDay4(String symbol) {
+        log.info("GraphRunner Day4 启动: symbol={}", symbol);
 
-        // -----------------------------------------------------------------
-        // ① compile()：把"设计图"变成"可执行图"（校验节点/边）
-        // -----------------------------------------------------------------
-        // compile() 可能抛 GraphStateException（受检异常），
-        // 这里转成 IllegalStateException（非受检），避免污染上层签名。
         final CompiledGraph<QuantAgentState> compiledGraph;
         try {
-            compiledGraph = stateGraph.compile();
+            compiledGraph = stateGraph.compileDay4();
         } catch (org.bsc.langgraph4j.GraphStateException e) {
             throw new IllegalStateException("图编译失败: " + e.getMessage(), e);
         }
 
-        // -----------------------------------------------------------------
-        // ② invoke(Map)：传入初始数据，驱动整张图执行到 END
-        // -----------------------------------------------------------------
-        // Map.of(StateKeys.SYMBOL, symbol) —— 只给初始 symbol，其他字段由节点填充
-        // 框架内部：
-        //   用 QuantAgentState::new 把 Map 变成初始 State
-        //   → 从 START 出发，按拓扑执行节点
-        //   → 条件边根据 needsTool 路由
-        //   → 到达 END 后返回最终 State
         Optional<QuantAgentState> output = compiledGraph.invoke(Map.of(StateKeys.SYMBOL, symbol));
 
-        // -----------------------------------------------------------------
-        // ③ 取出最终结果，空则快速失败
-        // -----------------------------------------------------------------
         QuantAgentState finalState = output.orElseThrow(
                 () -> new IllegalStateException("图执行无输出: symbol=" + symbol));
 
-        log.info("GraphRunner 完成: symbol={}, finalResult={}",
+        log.info("GraphRunner Day4 完成: symbol={}, finalResult={}",
                 symbol, finalState.finalResult());
+        return finalState;
+    }
+
+    /**
+     * 执行 Day 5 图（动态规划 + 重规划循环），返回最终状态。
+     *
+     * @param symbol 股票代码
+     * @return 最终 State（含 results / reviewResult）
+     * @throws IllegalStateException 图执行无输出
+     */
+    public QuantAgentState runDay5(String symbol) {
+        log.info("GraphRunner Day5 启动: symbol={}", symbol);
+
+        final CompiledGraph<QuantAgentState> compiledGraph;
+        try {
+            compiledGraph = stateGraph.compileDay5();
+        } catch (org.bsc.langgraph4j.GraphStateException e) {
+            throw new IllegalStateException("图编译失败: " + e.getMessage(), e);
+        }
+
+        Optional<QuantAgentState> output = compiledGraph.invoke(Map.of(StateKeys.SYMBOL, symbol));
+
+        QuantAgentState finalState = output.orElseThrow(
+                () -> new IllegalStateException("图执行无输出: symbol=" + symbol));
+
+        log.info("GraphRunner Day5 完成: symbol={}, results={}, reviewResult={}",
+                symbol, finalState.results(), finalState.value(StateKeys.REVIEW_RESULT));
         return finalState;
     }
 }

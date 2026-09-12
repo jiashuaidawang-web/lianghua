@@ -22,13 +22,19 @@ package com.quant.agent.domain.state;
 //     - private 构造器：禁止被实例化（常量类不需要 new StateKeys()）
 //     这就是《Effective Java》里的"实用工具类"模式。
 //
-//   💡 这 6 个 key 分别代表什么？
+//   💡 Day 4 的 6 个 key 分别代表什么？
 //     - SYMBOL：用户输入的股票代码（起点）
 //     - ANALYSIS_RESULT：LLM 分析结果文本（analysisNode 写入）
 //     - TOOL_DATA：工具返回的真实数据（toolNode 写入）
 //     - FINAL_RESULT：最终汇总结果（outputNode 写入，终点）
 //     - NEEDS_TOOL：是否需要调用工具（analysisNode 写入，条件边据此路由）
 //     - ERROR_MESSAGE：错误信息（任一出错时写入）
+//
+//   💡 Day 5 新增 4 个 key：
+//     - TASKS：PlannerNode 生成的任务列表（List<Task>）
+//     - RESULTS：ExecutorNode 的执行结果（Map<String, String>，key=TaskType，value=结果）
+//     - REVIEW_RESULT：ReviewNode 的审查结果（"pass" 或 "fail"）
+//     - PLAN_ATTEMPT：重规划次数计数器（int，防无限循环）
 //
 //   ⬇ 下一步：看 QuantAgentState，它继承 AgentState 并提供这些 key 的类型化访问。
 // ============================================================================================
@@ -47,4 +53,20 @@ public final class StateKeys {  // final：禁止继承
     public static final String FINAL_RESULT = "finalResult";
     public static final String NEEDS_TOOL = "needsTool";
     public static final String ERROR_MESSAGE = "errorMessage";
+
+    // ========================================================================
+    // Day 5 新增：Planner / Executor / Review 三个节点使用的 key
+    // ========================================================================
+
+    /** PlannerNode 生成的任务列表（List<Task>） */
+    public static final String TASKS = "tasks";
+
+    /** ExecutorNode 的执行结果（Map<String, String>，key=TaskType名，value=结果文本） */
+    public static final String RESULTS = "results";
+
+    /** ReviewNode 的审查结果："pass" 或 "fail" */
+    public static final String REVIEW_RESULT = "reviewResult";
+
+    /** 重规划次数计数器（int），防无限循环 */
+    public static final String PLAN_ATTEMPT = "planAttempt";
 }

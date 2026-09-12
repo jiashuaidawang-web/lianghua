@@ -1,13 +1,26 @@
 # Day 5 Tasks
 
-- [ ] Confirm current API from official docs/Javadoc.
-- [ ] Implement domain contract.
-- [ ] Implement infrastructure adapter/node/tool.
-- [ ] Wire the application path.
-- [ ] Add normal-path JUnit 5 test.
-- [ ] Add error/boundary JUnit 5 test.
-- [ ] Run `mvn test`.
-- [ ] Update README/checklist with observed results.
+- [x] Confirm current API from official docs/Javadoc.
+- [x] Implement domain contract.
+- [x] Implement infrastructure adapter/node/tool.
+- [x] Wire the application path.
+- [x] Add normal-path JUnit 5 test.
+- [x] Add error/boundary JUnit 5 test.
+- [x] Run `mvn test`.
+- [x] Update README/checklist with observed results.
+
+## 实现说明
+
+| Task | 实际落点 |
+|------|---------|
+| Confirm API | LangGraph4j 1.8.26 StateGraph / AsyncNodeAction / AsyncEdgeAction |
+| domain contract | `TaskType`(7 枚举) + `Task`(record, Serializable) |
+| adapter/node/tool | `PlannerAiService`/`PlannerService` + `PlannerNode`/`ExecutorNode`/`ReviewNode` + `TaskHandler` ×3 |
+| application path | `AiServicesConfiguration` Day5 beans + `GraphRunner.runDay5()` + `PlannerController` |
+| normal-path test | `PlannerServiceTest`/`PlannerNodeTest`/`ExecutorNodeTest`/`ReviewNodeTest` + `QuantAgentStateGraphTest` Day5 |
+| error/boundary test | 重试耗尽、target 为空、未知 TaskType、重规划上限、review fail→pass 循环 |
+| mvn test | 34 tests, BUILD SUCCESS |
+| docs/checklist | checklist.md + tasks.md 更新 |
 
 ## Vertical Evolution Contract
 

@@ -2,6 +2,7 @@ package com.quant.agent.domain.state;
 
 import org.bsc.langgraph4j.state.AgentState;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -117,5 +118,31 @@ public class QuantAgentState extends AgentState {
     @SuppressWarnings("unchecked")
     public String errorMessage() {
         return (String) value(StateKeys.ERROR_MESSAGE).orElse(null);
+    }
+
+    // ========================================================================
+    // Day 5 新增 accessor（Planner / Executor / Review 节点使用的字段）
+    // ========================================================================
+
+    /** PlannerNode 生成的任务列表 */
+    @SuppressWarnings("unchecked")
+    public <T> List<com.quant.agent.domain.task.Task> tasks() {
+        return (List<com.quant.agent.domain.task.Task>) value(StateKeys.TASKS).orElse(List.of());
+    }
+
+    /** ExecutorNode 的执行结果（Map<TaskType名, 结果文本>） */
+    @SuppressWarnings("unchecked")
+    public Map<String, String> results() {
+        return (Map<String, String>) value(StateKeys.RESULTS).orElse(Map.of());
+    }
+
+    /** ReviewNode 的审查结果："pass" 或 "fail" */
+    public boolean reviewPassed() {
+        return "pass".equals(value(StateKeys.REVIEW_RESULT).orElse(""));
+    }
+
+    /** 重规划次数计数器 */
+    public int planAttempt() {
+        return (int) value(StateKeys.PLAN_ATTEMPT).orElse(0);
     }
 }

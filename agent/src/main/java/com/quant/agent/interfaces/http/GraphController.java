@@ -77,7 +77,8 @@ public class GraphController {
     @GetMapping("/api/v1/graph/analyze")
     public String analyze(@RequestParam String symbol) {
         // 一键开工：给 symbol，拿最终结果
-        QuantAgentState finalState = graphRunner.run(symbol);
+        // Day 4 拓扑：固定流程 analysis → tool → output
+        QuantAgentState finalState = graphRunner.runDay4(symbol);
         return finalState.finalResult();
     }
 }

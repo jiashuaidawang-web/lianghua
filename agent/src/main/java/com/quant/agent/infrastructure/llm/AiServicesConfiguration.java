@@ -2,9 +2,15 @@ package com.quant.agent.infrastructure.llm;
 
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
+import com.quant.agent.application.planner.PlannerAiService;
+import com.quant.agent.application.planner.PlannerService;
 import com.quant.agent.application.tool.StockTools;
+import com.quant.agent.graph.handlers.TaskHandler;
 import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
+import com.quant.agent.graph.nodes.PlannerNode;
+import com.quant.agent.graph.nodes.ReviewNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import com.quant.agent.graph.runtime.GraphRunner;
 import com.quant.agent.graph.topology.QuantAgentStateGraph;
@@ -12,6 +18,8 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.List;
 
 // ============================================================================================
 // 【Day 1~4 · 阅读入口】AiServicesConfiguration —— Spring 的"装配车间"，把所有零件装成 Bean。
@@ -123,5 +131,55 @@ public class AiServicesConfiguration {
     @Bean
     public GraphRunner graphRunner(QuantAgentStateGraph quantAgentStateGraph) {
         return new GraphRunner(quantAgentStateGraph);
+    }
+
+    // ========================================================================
+    // Day 5：Planner Runtime Beans（从底到顶装配）
+    // ========================================================================
+
+    // ---- Planner 代理：调 LLM 生成 Task 列表 ---------------------------
+    @Bean
+    public PlannerAiService plannerAiService(ChatModel chatLanguageModel) {
+        return AiServices.create(PlannerAiService.class, chatLanguageModel);
+    }
+
+    // ---- Planner 应用服务：调代理 + 校验 + 重试 ------------------------
+    @Bean
+    public PlannerService plannerService(PlannerAiService plannerAiService) {
+        return new PlannerService(plannerAiService);
+    }
+
+    // ---- 第 1 层：三个新 Node（工人）----------------------------------
+    @Bean
+    public PlannerNode plannerNode(PlannerService plannerService) {
+        return new PlannerNode(plannerService);
+    }
+
+    @Bean
+    public ExecutorNode executorNode(List<TaskHandler> handlers) {
+        // Spring 自动注入所有 TaskHandler 实现类
+        return new ExecutorNode(handlers);
+    }
+
+    @Bean
+    public ReviewNode reviewNode() {
+        return new ReviewNode();
+    }
+
+    // ---- 第 2 层：图（把节点连起来）---------------------------------
+    // Day 5 重构图拓扑：planner → executor → review →(pass→END / fail→planner)
+
+    @Bean
+    public QuantAgentStateGraph quantAgentStateGraphDay5(PlannerNode plannerNode,
+                                                         ExecutorNode executorNode,
+                                                         ReviewNode reviewNode) {
+        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode);
+    }
+
+    // ---- 第 3 层：运行入口（一键开工）-------------------------------
+
+    @Bean
+    public GraphRunner graphRunnerDay5(QuantAgentStateGraph quantAgentStateGraphDay5) {
+        return new GraphRunner(quantAgentStateGraphDay5);
     }
 }
