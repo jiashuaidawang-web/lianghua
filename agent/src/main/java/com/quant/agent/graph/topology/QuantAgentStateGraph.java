@@ -84,6 +84,12 @@ public class QuantAgentStateGraph {
     public static final String REVIEW = "review";
     public static final String RENDER = "render";
 
+    // -------------------------------------------------------------------------
+    // Day 6：终止策略参数（重规划上限）
+    // -------------------------------------------------------------------------
+    // 从 reviewNode 内常量移到这里，作为图拓扑层的显式配置。
+    private static final int MAX_PLAN_ATTEMPT = 3;
+
     // ========================================================================
     // Day 4 拓扑（固定流程）
     // ========================================================================
@@ -159,8 +165,9 @@ public class QuantAgentStateGraph {
      *
      * <p>拓扑：
      * <pre>
-     *   START → planner → executor → review ──[pass]──→ render → END
-     *                                └──[fail]──→ planner（重规划循环）
+     *   START → planner → executor → review ──[attempt&lt;MAX &amp; pass]──→ render → END
+     *                                ──[attempt&lt;MAX &amp; fail]──→ planner（重规划循环）
+     *                                ──[attempt&gt;=MAX]────────→ END（直接终止）
      * </pre>
      */
     public CompiledGraph<QuantAgentState> compileDay5() throws GraphStateException {
@@ -179,23 +186,28 @@ public class QuantAgentStateGraph {
         graph.addEdge(RENDER, END);
 
         // -----------------------------------------------------------------
-        // 条件边：reviewNode 之后的"智能岔口"（重规划循环）
+        // 条件边：reviewNode 之后的"智能岔口"（重规划循环 + 终止策略）
         // -----------------------------------------------------------------
-        // 这是 Day 5 和 Day 4 最大的不同：
-        //   Day 4 的条件边：analysis → tool 或 output（单向，不循环）
-        //   Day 5 的条件边：review → render 或 planner（可能循环！）
-        // pass → render（润色后结束），fail → planner（重规划）
+        // Day 6 改动：终止策略从 reviewNode 移到条件边路由函数。
+        //   reviewNode 只管诚实审查（pass/fail），不管循环策略。
+        //   路由函数读 planAttempt，超限直接 return END，不再伪造 pass。
         graph.addConditionalEdges(
                 REVIEW,
                 AsyncEdgeAction.edge_async(state -> {
-                    // 路由员看 state.reviewPassed()
+                    // 终止策略：重规划次数耗尽 → 直接走 END
+                    int maxAttempt = MAX_PLAN_ATTEMPT;
+                    if (state.planAttempt() >= maxAttempt) {
+                        log.warn("重规划次数耗尽: attempt={}/{}, 直接终止", state.planAttempt(), maxAttempt);
+                        return END;
+                    }
+                    // 正常路由：pass → render，fail → planner（重规划）
                     boolean pass = state.reviewPassed();
                     String route = pass ? RENDER : PLANNER;
                     log.debug("Day5 条件边路由: reviewPassed={} → {}", pass, route);
                     return route;
                 }),
-                // 路由表：pass → RENDER（润色后到 END），fail → PLANNER（重规划）
-                Map.of(RENDER, RENDER, PLANNER, PLANNER)
+                // 路由表：pass → RENDER, fail → PLANNER, 终止 → END
+                Map.of(RENDER, RENDER, PLANNER, PLANNER, END, END)
         );
 
         return graph.compile();

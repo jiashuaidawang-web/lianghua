@@ -197,4 +197,51 @@ class QuantAgentStateGraphTest {
         verify(executorNode, times(2)).apply(any());
         verify(reviewNode, times(2)).apply(any());
     }
+
+    // ========================================================================
+    // 【Day 6 · 正式测试】终止策略：重规划耗尽后直接走 END，不经过 render
+    // ========================================================================
+    // Day 6 核心改动验证：
+    //   reviewNode 诚实返回 fail（不再强制 pass）
+    //   条件边路由函数读 planAttempt >= MAX → 直接 return END
+    //   图终止，不经过 renderNode
+    @Test
+    void shouldTerminateDirectlyToEndWhenReplanExhausted() throws Exception {
+        List<Task> tasks = List.of(Task.of(TaskType.ANALYSIS, "600519"));
+
+        // 真实 PlannerNode（planAttempt 会真实累加：1→2→3）
+        com.quant.agent.application.planner.PlannerService plannerService =
+                mock(com.quant.agent.application.planner.PlannerService.class);
+        when(plannerService.plan(any())).thenReturn(tasks);
+        PlannerNode plannerNode = new PlannerNode(plannerService);
+
+        // executor 每次 results 都含"失败" → reviewNode 诚实返回 fail
+        ExecutorNode executorNode = mock(ExecutorNode.class);
+        when(executorNode.apply(any())).thenReturn(Map.of(
+                "results", Map.of("ANALYSIS", "分析失败: LLM 超时")));
+
+        // 真实 ReviewNode（Day 6 改动后：诚实审查，不强制 pass）
+        ReviewNode reviewNode = new ReviewNode();
+
+        // renderNode：如果终止策略正确，这个节点永远不会被调到
+        RenderNode renderNode = mock(RenderNode.class);
+        when(renderNode.apply(any())).thenReturn(Map.of("renderedResult", "（渲染结果）"));
+
+        QuantAgentStateGraph graph = new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
+        CompiledGraph<QuantAgentState> compiled = graph.compileDay5();
+
+        Optional<QuantAgentState> output = compiled.invoke(Map.of("symbol", "600519"));
+
+        assertTrue(output.isPresent());
+        QuantAgentState finalState = output.get();
+
+        // 验证：最终 planAttempt = 3（规划了 3 次）
+        assertEquals(3, finalState.planAttempt(), "应规划了 3 次");
+
+        // 验证：最终 reviewResult = "fail"（诚实，不是伪造的 pass）
+        assertFalse(finalState.reviewPassed(), "最终 review 应是真实失败");
+
+        // 验证：renderNode 从未被调用（直接走 END，不浪费渲染）
+        verify(renderNode, never()).apply(any());
+    }
 }

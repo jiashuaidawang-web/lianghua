@@ -55,9 +55,6 @@ public class ReviewNode {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewNode.class);
 
-    // 最大重规划次数：防无限循环
-    private static final int MAX_PLAN_ATTEMPT = 3;
-
     public Map<String, Object> apply(QuantAgentState state) {
         log.info("reviewNode 执行");
 
@@ -74,27 +71,13 @@ public class ReviewNode {
                 .anyMatch(result -> result != null && result.contains("失败"));
 
         // -------------------------------------------------------------------------
-        // 决定 pass 或 fail
+        // 诚实审查：只返回审查结果，不做循环策略判断
         // -------------------------------------------------------------------------
-        String reviewResult;
-        if (hasFailure) {
-            // 有失败 → 检查是否超过重规划上限
-            int attempt = state.planAttempt();
-            if (attempt >= MAX_PLAN_ATTEMPT) {
-                // 超过上限 → 强制结束，不再重规划
-                log.warn("重规划次数耗尽: attempt={}, 强制结束", attempt);
-                reviewResult = "pass";  // 强制 pass，结束循环
-                updates.put(StateKeys.ERROR_MESSAGE, "重规划 " + attempt + " 次后仍失败，强制结束");
-            } else {
-                // 未超上限 → fail，触发重规划
-                log.info("审查不通过，准备重规划: attempt={}/{}", attempt, MAX_PLAN_ATTEMPT);
-                reviewResult = "fail";
-            }
-        } else {
-            // 全部成功 → pass
-            log.info("审查通过");
-            reviewResult = "pass";
-        }
+        // Day 6 改动：终止策略（是否超出重规划上限、是否直接走 END）交给条件边路由函数判断。
+        // reviewNode 职责单一：只审查 results 是否合格。
+        String reviewResult = hasFailure ? "fail" : "pass";
+
+        log.info("审查{}: reviewResult={}", hasFailure ? "不通过" : "通过", reviewResult);
 
         // 写 REVIEW_RESULT：条件边据此决定走 END 还是 PlannerNode
         updates.put(StateKeys.REVIEW_RESULT, reviewResult);

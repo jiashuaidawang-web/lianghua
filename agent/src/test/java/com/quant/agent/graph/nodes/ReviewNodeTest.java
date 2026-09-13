@@ -62,23 +62,24 @@ class ReviewNodeTest {
      * 有失败但超过重规划上限 → 强制 pass（防无限循环）。
      */
     @Test
-    void shouldForcePassWhenMaxAttemptsReached() {
-        // Fixture：有失败，但 planAttempt = 3（已达上限）
+    void shouldFailHonestlyEvenWhenMaxAttemptsReached() {
+        // Day 6 改动：reviewNode 不再做终止策略判断，只管诚实审查。
+        // 即使 planAttempt 已达上限，有失败就返回 fail（终止交给条件边路由函数）。
         QuantAgentState state = new QuantAgentState(Map.of(
                 "symbol", "600519",
                 "results", Map.of(
                         "ANALYSIS", "分析失败: LLM 超时"  // ← 有"失败"
                 ),
-                "planAttempt", 3  // ← 已达上限
+                "planAttempt", 3  // ← 已达上限（但 reviewNode 不再关心这个）
         ));
 
         Map<String, Object> updates = node.apply(state);
 
-        // 验证：强制 pass
-        assertEquals("pass", updates.get("reviewResult"));
+        // 验证：诚实返回 fail（不再强制 pass）
+        assertEquals("fail", updates.get("reviewResult"));
 
-        // 验证：写入了 ERROR_MESSAGE
-        assertTrue(updates.containsKey("errorMessage"));
-        assertTrue(updates.get("errorMessage").toString().contains("重规划"));
+        // 验证：不再写 errorMessage（那是终止策略的事，不是审查的事）
+        assertFalse(updates.containsKey("errorMessage"),
+                "reviewNode 不再负责终止策略，不应写 errorMessage");
     }
 }
