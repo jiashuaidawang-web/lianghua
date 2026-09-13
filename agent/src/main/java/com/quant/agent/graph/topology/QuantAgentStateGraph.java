@@ -9,14 +9,17 @@ import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.GraphStateException;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.action.AsyncEdgeAction;
 import org.bsc.langgraph4j.action.AsyncNodeAction;
+import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Optional;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
@@ -161,7 +164,7 @@ public class QuantAgentStateGraph {
     }
 
     /**
-     * Day 5 编译：动态规划 + 重规划循环 + 结果渲染。
+     * Day 5 + Day 7 编译：动态规划 + 重规划循环 + 结果渲染 + Checkpoint 快照。
      *
      * <p>拓扑：
      * <pre>
@@ -169,8 +172,13 @@ public class QuantAgentStateGraph {
      *                                ──[attempt&lt;MAX &amp; fail]──→ planner（重规划循环）
      *                                ──[attempt&gt;=MAX]────────→ END（直接终止）
      * </pre>
+     *
+     * <p>Day 7 改动：新增 {@link CompileConfig} + {@link BaseCheckpointSaver} 注入。
+     * 框架在每节点执行后自动调 saver.put() 存快照，无需手动调 save。
+     *
+     * @param checkpointSaver Checkpoint 存储实现（MemorySaver 测试用 / FileSystemSaver 单机 / Redis 生产）
      */
-    public CompiledGraph<QuantAgentState> compileDay5() throws GraphStateException {
+    public CompiledGraph<QuantAgentState> compileDay5(BaseCheckpointSaver checkpointSaver) throws GraphStateException {
         StateGraph<QuantAgentState> graph = new StateGraph<>(QuantAgentState::new);
 
         // 注册节点
@@ -210,6 +218,22 @@ public class QuantAgentStateGraph {
                 Map.of(RENDER, RENDER, PLANNER, PLANNER, END, END)
         );
 
-        return graph.compile();
+        // -----------------------------------------------------------------
+        // Day 7 改动：接入 CheckpointSaver，框架自动每节点存快照
+        // -----------------------------------------------------------------
+        CompileConfig config = CompileConfig.builder()
+                .checkpointSaver(checkpointSaver)
+                .build();
+
+        return graph.compile(config);
+    }
+
+    /**
+     * Day 5 编译（无 Checkpoint，兼容旧调用）。
+     *
+     * <p>保留无参版本，方便不需要快照的场景（如简单测试）。
+     */
+    public CompiledGraph<QuantAgentState> compileDay5() throws GraphStateException {
+        return compileDay5(new org.bsc.langgraph4j.checkpoint.MemorySaver());
     }
 }

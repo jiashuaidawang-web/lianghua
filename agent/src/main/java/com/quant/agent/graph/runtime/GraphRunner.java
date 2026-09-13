@@ -4,11 +4,16 @@ import com.quant.agent.domain.state.QuantAgentState;
 import com.quant.agent.domain.state.StateKeys;
 import com.quant.agent.graph.topology.QuantAgentStateGraph;
 import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.RunnableConfig;
+import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
+import org.bsc.langgraph4j.checkpoint.Checkpoint;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 // ============================================================================================
 // 【Day 4 · 阅读入口】GraphRunner —— "一键开工"按钮，封装 compile + invoke 的统一入口。
@@ -100,22 +105,75 @@ public class GraphRunner {
      * @throws IllegalStateException 图执行无输出
      */
     public QuantAgentState runDay5(String symbol) {
+        return runDay5(symbol, new org.bsc.langgraph4j.checkpoint.MemorySaver());
+    }
+
+    /**
+     * 执行 Day 5 图（带 Checkpoint 快照）。
+     *
+     * <p>Day 7 改动：注入 BaseCheckpointSaver，框架每节点自动存快照。
+     * 如果执行中断，可用 threadId 调 {@link #resumeDay5} 恢复。
+     *
+     * @param symbol          股票代码
+     * @param checkpointSaver Checkpoint 存储实现
+     * @return 最终 State（含 results / reviewResult）
+     */
+    public QuantAgentState runDay5(String symbol, BaseCheckpointSaver checkpointSaver) {
         log.info("GraphRunner Day5 启动: symbol={}", symbol);
 
         final CompiledGraph<QuantAgentState> compiledGraph;
         try {
-            compiledGraph = stateGraph.compileDay5();
+            compiledGraph = stateGraph.compileDay5(checkpointSaver);
         } catch (org.bsc.langgraph4j.GraphStateException e) {
             throw new IllegalStateException("图编译失败: " + e.getMessage(), e);
         }
 
-        Optional<QuantAgentState> output = compiledGraph.invoke(Map.of(StateKeys.SYMBOL, symbol));
+        // 生成 threadId（同一 symbol 的请求可追踪）
+        String threadId = "day5-" + symbol + "-" + UUID.randomUUID().toString().substring(0, 8);
+        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+
+        Optional<QuantAgentState> output = compiledGraph.invoke(Map.of(StateKeys.SYMBOL, symbol), config);
 
         QuantAgentState finalState = output.orElseThrow(
                 () -> new IllegalStateException("图执行无输出: symbol=" + symbol));
 
-        log.info("GraphRunner Day5 完成: symbol={}, results={}, reviewResult={}",
-                symbol, finalState.results(), finalState.value(StateKeys.REVIEW_RESULT));
+        log.info("GraphRunner Day5 完成: symbol={}, threadId={}, results={}, reviewResult={}",
+                symbol, threadId, finalState.results(), finalState.value(StateKeys.REVIEW_RESULT));
+        return finalState;
+    }
+
+    /**
+     * Day 7 新增：从 Checkpoint 恢复续传。
+     *
+     * <p>当 {@link #runDay5(String, BaseCheckpointSaver)} 执行中断（进程崩溃/网络故障），
+     * 用户/调度器可持 threadId 调此方法恢复。框架加载最近一次 Checkpoint，
+     * 从断点下一节点继续执行，不重复已完成节点。
+     *
+     * @param threadId        执行线程 ID（runDay5 时生成）
+     * @param checkpointSaver 与 runDay5 时相同的存储实现
+     * @return 最终 State
+     * @throws IllegalStateException Checkpoint 不存在或恢复失败
+     */
+    public QuantAgentState resumeDay5(String threadId, BaseCheckpointSaver checkpointSaver) {
+        log.info("GraphRunner Day5 恢复: threadId={}", threadId);
+
+        final CompiledGraph<QuantAgentState> compiledGraph;
+        try {
+            compiledGraph = stateGraph.compileDay5(checkpointSaver);
+        } catch (org.bsc.langgraph4j.GraphStateException e) {
+            throw new IllegalStateException("图编译失败: " + e.getMessage(), e);
+        }
+
+        // 构造恢复配置：带 threadId，框架自动加载最近 Checkpoint
+        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+
+        Optional<QuantAgentState> output = compiledGraph.invoke(Map.of(StateKeys.SYMBOL, "RESUME"), config);
+
+        QuantAgentState finalState = output.orElseThrow(
+                () -> new IllegalStateException("图恢复无输出: threadId=" + threadId));
+
+        log.info("GraphRunner Day5 恢复完成: threadId={}, results={}, reviewResult={}",
+                threadId, finalState.results(), finalState.value(StateKeys.REVIEW_RESULT));
         return finalState;
     }
 }
