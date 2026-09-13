@@ -5,6 +5,7 @@ import com.quant.agent.graph.nodes.AnalysisNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
+import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -81,6 +82,7 @@ public class QuantAgentStateGraph {
     public static final String PLANNER = "planner";
     public static final String EXECUTOR = "executor";
     public static final String REVIEW = "review";
+    public static final String RENDER = "render";
 
     // ========================================================================
     // Day 4 拓扑（固定流程）
@@ -137,22 +139,29 @@ public class QuantAgentStateGraph {
     private PlannerNode day5PlannerNode;
     private ExecutorNode day5ExecutorNode;
     private ReviewNode day5ReviewNode;
+    private RenderNode day5RenderNode;
 
     /**
-     * Day 5 构造器：注入 Day 5 的三个节点。
+     * Day 5 构造器：注入 Day 5 的四个节点。
      *
      * <p>注意：这个构造器和 Day 4 的是分开的，因为注入的节点不同。
      */
-    public QuantAgentStateGraph(PlannerNode plannerNode, ExecutorNode executorNode, ReviewNode reviewNode) {
+    public QuantAgentStateGraph(PlannerNode plannerNode, ExecutorNode executorNode,
+                                 ReviewNode reviewNode, RenderNode renderNode) {
         this.day5PlannerNode = plannerNode;
         this.day5ExecutorNode = executorNode;
         this.day5ReviewNode = reviewNode;
+        this.day5RenderNode = renderNode;
     }
 
     /**
-     * Day 5 编译：动态规划 + 重规划循环。
+     * Day 5 编译：动态规划 + 重规划循环 + 结果渲染。
      *
-     * <p>拓扑：START → planner → executor → review →(pass→END / fail→planner)
+     * <p>拓扑：
+     * <pre>
+     *   START → planner → executor → review ──[pass]──→ render → END
+     *                                └──[fail]──→ planner（重规划循环）
+     * </pre>
      */
     public CompiledGraph<QuantAgentState> compileDay5() throws GraphStateException {
         StateGraph<QuantAgentState> graph = new StateGraph<>(QuantAgentState::new);
@@ -161,29 +170,32 @@ public class QuantAgentStateGraph {
         graph.addNode(PLANNER, AsyncNodeAction.node_async(day5PlannerNode::apply));
         graph.addNode(EXECUTOR, AsyncNodeAction.node_async(day5ExecutorNode::apply));
         graph.addNode(REVIEW, AsyncNodeAction.node_async(day5ReviewNode::apply));
+        graph.addNode(RENDER, AsyncNodeAction.node_async(day5RenderNode::apply));
 
-        // 固定边：START→planner, planner→executor, executor→review
+        // 固定边：START→planner, planner→executor, executor→review, render→END
         graph.addEdge(START, PLANNER);
         graph.addEdge(PLANNER, EXECUTOR);
         graph.addEdge(EXECUTOR, REVIEW);
+        graph.addEdge(RENDER, END);
 
         // -----------------------------------------------------------------
         // 条件边：reviewNode 之后的"智能岔口"（重规划循环）
         // -----------------------------------------------------------------
         // 这是 Day 5 和 Day 4 最大的不同：
         //   Day 4 的条件边：analysis → tool 或 output（单向，不循环）
-        //   Day 5 的条件边：review → END 或 planner（可能循环！）
+        //   Day 5 的条件边：review → render 或 planner（可能循环！）
+        // pass → render（润色后结束），fail → planner（重规划）
         graph.addConditionalEdges(
                 REVIEW,
                 AsyncEdgeAction.edge_async(state -> {
                     // 路由员看 state.reviewPassed()
                     boolean pass = state.reviewPassed();
-                    String route = pass ? END : PLANNER;
+                    String route = pass ? RENDER : PLANNER;
                     log.debug("Day5 条件边路由: reviewPassed={} → {}", pass, route);
                     return route;
                 }),
-                // 路由表：pass → END（结束），fail → PLANNER（重规划）
-                Map.of(END, END, PLANNER, PLANNER)
+                // 路由表：pass → RENDER（润色后到 END），fail → PLANNER（重规划）
+                Map.of(RENDER, RENDER, PLANNER, PLANNER)
         );
 
         return graph.compile();

@@ -121,4 +121,24 @@ public class LlmConfiguration {
                 .responseFormat(stockAnalysisResponseFormat())
                 .build();
     }
+
+    // -------------------------------------------------------------------------
+    // Day 5：非流式 LLM（无 Schema 约束，供 Planner 使用）
+    // -------------------------------------------------------------------------
+    // 为什么不能复用 chatLanguageModel？
+    //   chatLanguageModel 硬编码了 StockAnalysis 的 responseFormat（API 级硬约束），
+    //   对这个 Bean 的每一次调用都强制返回 {action,symbol,score,reason}。
+    //   但 Planner 需要返回 List<Task>（完全不同的 JSON 结构），
+    //   复用同一个 Bean → 反序列化失败 → 异常（这就是 planner 20ms 报错 error=null 的根因）。
+    //
+    // 所以 planner 需要一个"裸"ChatModel：只负责把 prompt 送出去、拿回完整文本，
+    // 返回什么格式由 prompt 决定，校验/重试由 PlannerService 负责。
+    @Bean
+    public ChatModel plainChatLanguageModel(LlmProperties properties) {
+        return OpenAiChatModel.builder()
+                .apiKey(properties.getApiKey())
+                .baseUrl(properties.getBaseUrl())
+                .modelName(properties.getModelName())
+                .build();
+    }
 }

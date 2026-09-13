@@ -1,5 +1,6 @@
 package com.quant.agent.application.planner;
 
+import com.quant.agent.domain.task.Plan;
 import com.quant.agent.domain.task.Task;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
@@ -51,10 +52,15 @@ public interface PlannerAiService {
     //   2. 任务：把用户请求拆成 Task 列表
     //   3. 约束：只能使用列出的 7 种 TaskType，不能发明新的
     //   4. 输出格式：JSON 数组
+    //   5. 股票代码：用户输入是自然语言，必须先提取 6 位股票代码作为 target
     String SYSTEM_PROMPT = """
             你是一个任务规划师。
 
             你的职责：把用户的自然语言请求，拆分成一个 Task 列表。
+
+            重要：用户的请求是自然语言（如"分析茅台值不值得买"、"这个票怎么样002909"），
+            你必须先从请求中提取出 6 位股票代码（如 600519、002909），作为 Task 的 target。
+            如果请求末尾或中间有 6 位数字，那通常就是股票代码。
 
             你只能使用以下 7 种 Task 类型（不能发明新类型！）：
 
@@ -66,16 +72,18 @@ public interface PlannerAiService {
             6. EXECUTE    —— 执行操作（如下单，但需要人工确认）
             7. NOTIFY     —— 通知用户（发送通知）
 
-            输出格式：JSON 数组，每个元素是一个 Task：
-            [
-              { "type": "ANALYSIS", "target": "股票代码" },
-              { "type": "DATA_FETCH", "target": "股票代码", "params": {"fields": ["price", "pe"]} },
-              { "type": "REPORT", "params": {"format": "summary"} }
-            ]
+            输出格式：一个 JSON 对象，包含 "tasks" 数组，数组每个元素是一个 Task：
+            {
+              "tasks": [
+                { "type": "ANALYSIS", "target": "股票代码" },
+                { "type": "DATA_FETCH", "target": "股票代码", "params": {"fields": ["price", "pe"]} },
+                { "type": "REPORT", "params": {"format": "summary"} }
+              ]
+            }
 
             规则：
             - type 只能是上面 7 种之一，不能发明新的！
-            - target 通常是股票代码（如 "600519"）
+            - target 必须是你从用户请求中提取到的 6 位股票代码（如 "600519"、"002909"），不能省略！
             - params 是可选的扩展参数，不同 TaskType 可以用不同 key
             - 根据用户请求合理拆分，通常 2~5 个 Task
             - 考虑 Task 之间的依赖关系，有依赖的排在后面
@@ -84,8 +92,11 @@ public interface PlannerAiService {
     // -------------------------------------------------------------------------
     // 业务方法：给用户的自然语言请求，返回 Task 列表
     // -------------------------------------------------------------------------
-    // 返回 List<Task>：告诉 LangChain4j "把 LLM 返回的 JSON 数组反序列化成 List<Task>"。
-    // 如果 LLM 返回的 JSON 里 type 不是 7 种枚举之一 → 反序列化失败 → 由 PlannerService 处理。
+    // 返回 Plan（包装了 List<Task> 的 POJO）。
+    // ⚠ 不能直接返回 List<Task>：LangChain4j 1.20.0 的 PojoCollectionOutputParser
+    //    在生成输出格式指令时抛 IllegalStateException（版本 bug），
+    //    异常发生在组装 prompt 阶段，LLM 请求根本不会发出。
+    //    包成单 POJO 后，框架改用正常工作的 PojoOutputParser。
     @UserMessage(SYSTEM_PROMPT + "\n\n请分析以下用户请求并生成 Task 列表：\n{{userRequest}}")
-    List<Task> plan(@V("userRequest") String userRequest);
+    Plan plan(@V("userRequest") String userRequest);
 }

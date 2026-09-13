@@ -4,12 +4,14 @@ import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
 import com.quant.agent.application.planner.PlannerAiService;
 import com.quant.agent.application.planner.PlannerService;
+import com.quant.agent.application.render.RenderAiService;
 import com.quant.agent.application.tool.StockTools;
 import com.quant.agent.graph.handlers.TaskHandler;
 import com.quant.agent.graph.nodes.AnalysisNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
+import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import com.quant.agent.graph.runtime.GraphRunner;
@@ -138,9 +140,12 @@ public class AiServicesConfiguration {
     // ========================================================================
 
     // ---- Planner 代理：调 LLM 生成 Task 列表 ---------------------------
+    // ⚠ 注入的是 plainChatLanguageModel（无 Schema 约束），不是 chatLanguageModel。
+    //    chatLanguageModel 硬编码了 StockAnalysis 的 responseFormat，
+    //    复用会导致 planner 返回的 List<Task> 被强制扭曲成 StockAnalysis 对象 → 反序列化失败。
     @Bean
-    public PlannerAiService plannerAiService(ChatModel chatLanguageModel) {
-        return AiServices.create(PlannerAiService.class, chatLanguageModel);
+    public PlannerAiService plannerAiService(ChatModel plainChatLanguageModel) {
+        return AiServices.create(PlannerAiService.class, plainChatLanguageModel);
     }
 
     // ---- Planner 应用服务：调代理 + 校验 + 重试 ------------------------
@@ -166,14 +171,27 @@ public class AiServicesConfiguration {
         return new ReviewNode();
     }
 
+    // ---- 渲染代理 + 节点：LLM 润色结构化结果为人话 ----------------
+    @Bean
+    public RenderAiService renderAiService(ChatModel plainChatLanguageModel) {
+        // 用 plainChatLanguageModel（无 Schema 约束），渲染结果不需要强制 JSON
+        return AiServices.create(RenderAiService.class, plainChatLanguageModel);
+    }
+
+    @Bean
+    public RenderNode renderNode(RenderAiService renderAiService) {
+        return new RenderNode(renderAiService);
+    }
+
     // ---- 第 2 层：图（把节点连起来）---------------------------------
-    // Day 5 重构图拓扑：planner → executor → review →(pass→END / fail→planner)
+    // Day 5 重构图拓扑：planner → executor → review →(pass→render→END / fail→planner)
 
     @Bean
     public QuantAgentStateGraph quantAgentStateGraphDay5(PlannerNode plannerNode,
                                                          ExecutorNode executorNode,
-                                                         ReviewNode reviewNode) {
-        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode);
+                                                         ReviewNode reviewNode,
+                                                         RenderNode renderNode) {
+        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
     }
 
     // ---- 第 3 层：运行入口（一键开工）-------------------------------

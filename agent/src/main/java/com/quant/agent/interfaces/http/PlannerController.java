@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
 import java.util.Map;
 
 // ============================================================================================
@@ -23,10 +24,17 @@ import java.util.Map;
 //     │ 维度                 │ Day 4 GraphController         │ Day 5 PlannerController       │
 //     ├─────────────────────┼──────────────────────────────┼──────────────────────────────┤
 //     │ URL                  │ /api/v1/graph/analyze         │ /api/v1/planner/plan          │
+//     │ 参数名                │ symbol（股票代码）             │ query（自然语言请求）          │
+//     │ 参数示例              │ ?symbol=600519                │ ?query=分析茅台值不值得买      │
 //     │ 返回类型              │ String（finalResult 文本）    │ Map（tasks + results + review）│
 //     │ 用的 Runner 方法      │ runDay4()                     │ runDay5()                     │
 //     │ 流程                 │ 固定：analysis→tool→output    │ 动态：planner→executor→review │
 //     └─────────────────────┴──────────────────────────────┴──────────────────────────────┘
+//
+//   💡 为什么 Day 5 的参数叫 query 不叫 symbol？
+//     Day 4 是"给一个股票代码，做固定分析" —— 输入是 symbol。
+//     Day 5 是"给一句自然语言，动态规划任务" —— 输入是 query（可能包含股票代码）。
+//     例：?query=这个票值不值得买002909 → Java 先提取 002909，LLM 再做规划。
 //
 //   💡 为什么 Day 5 返回 Map 不返回 String？
 //     Day 4 只返回最终文本（finalResult），因为流程固定，用户只需要结论。
@@ -42,7 +50,7 @@ import java.util.Map;
 /**
  * Day 5 图执行端点。
  *
- * <p>GET /api/v1/planner/plan?symbol=贵州茅台
+ * <p>GET /api/v1/planner/plan?query=这个票值不值得买002909
  * 驱动 Day 5 的 Planner 图执行，返回规划 + 执行 + 审查的完整结果。
  */
 @RestController
@@ -57,22 +65,31 @@ public class PlannerController {
     /**
      * 执行 Day 5 规划图。
      *
-     * @param symbol 股票代码
+     * @param query 自然语言请求（可包含股票代码，如 "分析茅台" "这个票值不值得买002909"）
      * @return 包含 tasks / results / reviewResult 的 Map
      */
     @GetMapping("/api/v1/planner/plan")
-    public Map<String, Object> plan(@RequestParam String symbol) {
+    public Map<String, Object> plan(@RequestParam String query) {
         // 调 Day 5 拓扑：planner → executor → review →(pass→END / fail→planner)
-        QuantAgentState finalState = graphRunner.runDay5(symbol);
+        QuantAgentState finalState = graphRunner.runDay5(query);
+
+        // 提取到的股票代码：从第一个 Task 的 target 派生（PlannerService 用正则提取后兜底填入）
+        // 注意：tasks 可能为空（规划失败时），所以 extractedSymbol 可能是 null
+        String extractedSymbol = finalState.tasks().isEmpty()
+                ? null
+                : finalState.tasks().get(0).target();
 
         // 返回完整信息，不只是最终文本
-        return Map.of(
-                "symbol", symbol,
-                "tasks", finalState.tasks(),
-                "results", finalState.results(),
-                "reviewResult", finalState.value("reviewResult").orElse("unknown"),
-                "planAttempt", finalState.planAttempt(),
-                "errorMessage", finalState.errorMessage()  // ← 加这行，排查用
-        );
+        // 用 HashMap 而不是 Map.of()：Map.of() 不允许 null 值，会抛 NPE 导致 500
+        Map<String, Object> response = new HashMap<>();
+        response.put("query", query);
+        response.put("extractedSymbol", extractedSymbol);
+        response.put("tasks", finalState.tasks());
+        response.put("results", finalState.results());
+        response.put("reviewResult", finalState.value("reviewResult").orElse("unknown"));
+        response.put("renderedResult", finalState.renderedResult());
+        response.put("planAttempt", finalState.planAttempt());
+        response.put("errorMessage", finalState.errorMessage());
+        return response;
     }
 }

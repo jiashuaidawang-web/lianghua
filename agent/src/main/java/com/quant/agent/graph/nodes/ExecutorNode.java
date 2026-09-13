@@ -63,7 +63,10 @@ public class ExecutorNode {
     /**
      * 构造器：注入所有 TaskHandler 实现，转成 Map 注册表。
      *
+     * 这个方法妙就妙在用参数类型的集合注入,spring初始化这个类的时候,会先去找TaskHandler所有的实现类,发现所有的handlers后注入到集合中
+     *
      * @param handlers Spring 自动注入的 List<TaskHandler>
+     *
      */
     public ExecutorNode(List<TaskHandler> handlers) {
         // 把 List 转成 Map：TaskType → TaskHandler

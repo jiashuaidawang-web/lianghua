@@ -145,4 +145,10 @@ public class QuantAgentState extends AgentState {
     public int planAttempt() {
         return (int) value(StateKeys.PLAN_ATTEMPT).orElse(0);
     }
+
+    /** RenderNode 的 LLM 润色结果（给人类用户看的自然语言文本） */
+    @SuppressWarnings("unchecked")
+    public String renderedResult() {
+        return (String) value(StateKeys.RENDERED_RESULT).orElse(null);
+    }
 }

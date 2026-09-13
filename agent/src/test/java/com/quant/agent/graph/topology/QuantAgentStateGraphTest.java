@@ -7,6 +7,7 @@ import com.quant.agent.graph.nodes.AnalysisNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
+import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import org.bsc.langgraph4j.CompiledGraph;
@@ -118,7 +119,11 @@ class QuantAgentStateGraphTest {
                         .map(r -> Map.of("reviewResult", (Object) r))
                         .toArray(Map[]::new));
 
-        QuantAgentStateGraph graph = new QuantAgentStateGraph(plannerNode, executorNode, reviewNode);
+        // renderNode：拓扑测试只关心路由，渲染节点用 mock  stub 即可
+        RenderNode renderNode = mock(RenderNode.class);
+        when(renderNode.apply(any())).thenReturn(Map.of("renderedResult", "（渲染结果）"));
+
+        QuantAgentStateGraph graph = new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
         return graph.compileDay5();
     }
 
@@ -175,7 +180,11 @@ class QuantAgentStateGraphTest {
                 .thenReturn(Map.of("reviewResult", "fail"))
                 .thenReturn(Map.of("reviewResult", "pass"));
 
-        QuantAgentStateGraph graph = new QuantAgentStateGraph(plannerNode, executorNode, reviewNode);
+        // renderNode：拓扑测试只关心路由，渲染节点用 mock stub 即可
+        RenderNode renderNode = mock(RenderNode.class);
+        when(renderNode.apply(any())).thenReturn(Map.of("renderedResult", "（渲染结果）"));
+
+        QuantAgentStateGraph graph = new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
         CompiledGraph<QuantAgentState> compiled = graph.compileDay5();
 
         Optional<QuantAgentState> output = compiled.invoke(Map.of("symbol", "600519"));

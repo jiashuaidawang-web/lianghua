@@ -69,4 +69,7 @@ public final class StateKeys {  // final：禁止继承
 
     /** 重规划次数计数器（int），防无限循环 */
     public static final String PLAN_ATTEMPT = "planAttempt";
+
+    /** RenderNode 的 LLM 润色结果（给人类用户看的自然语言文本） */
+    public static final String RENDERED_RESULT = "renderedResult";
 }
