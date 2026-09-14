@@ -7,6 +7,10 @@ import com.quant.agent.application.planner.PlannerService;
 import com.quant.agent.application.render.RenderAiService;
 import com.quant.agent.application.tool.StockTools;
 import com.quant.agent.graph.handlers.TaskHandler;
+import com.quant.agent.infrastructure.tool.EastMoneyAdapter;
+import com.quant.agent.infrastructure.tool.MarketDataCache;
+import com.quant.agent.infrastructure.tool.MarketDataGateway;
+import com.quant.agent.infrastructure.tool.RateLimiter;
 import com.quant.agent.graph.nodes.AnalysisNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
@@ -75,11 +79,52 @@ public class AiServicesConfiguration {
         return AiServices.create(StockAnalysisAiService.class, chatLanguageModel);
     }
 
+    // ========================================================================
+    // Day 8：Finance Data Tooling —— 限流 + 缓存 + Adapter + 降级兜底
+    // ========================================================================
+    // Day 8 新增的工程护栏链：
+    //   StockTools → MarketDataGateway → [RateLimiter → Cache → EastMoneyAdapter]
+    // 不新增第三方依赖，全部 JDK 原生实现。
+
+    /**
+     * Day 8：RateLimiter Bean —— 令牌桶限流（1 次/秒，桶容量 2）。
+     * 为什么 1 次/秒？东财免费版限制 ~1s 1 次；桶容量 2 允许启动时小突发。
+     */
+    @Bean
+    public RateLimiter marketDataRateLimiter() {
+        return new RateLimiter(1.0, 2);
+    }
+
+    /**
+     * Day 8：MarketDataCache Bean —— TTL 5 秒、最大 1000 条目、10 秒清理间隔。
+     */
+    @Bean
+    public MarketDataCache marketDataCache() {
+        return new MarketDataCache(5000L, 1000, 10_000L);
+    }
+
+    /**
+     * Day 8：EastMoneyAdapter Bean —— 东财行情 API 适配器（启用降级兜底）。
+     */
+    @Bean
+    public EastMoneyAdapter eastMoneyAdapter() {
+        return new EastMoneyAdapter("https://push2.eastmoney.com", true);
+    }
+
+    /**
+     * Day 8：MarketDataGateway Bean —— 编排限流→缓存→Adapter→降级。
+     */
+    @Bean
+    public MarketDataGateway marketDataGateway(RateLimiter marketDataRateLimiter,
+                                                MarketDataCache marketDataCache,
+                                                EastMoneyAdapter eastMoneyAdapter) {
+        return new MarketDataGateway(marketDataRateLimiter, marketDataCache, eastMoneyAdapter);
+    }
 
     // ========================================================================
     // Day 3：支持工具调用的 AiService 代理
     // ========================================================================
-    // 和上面唯一的区别：通过 .tools(stockTools) 注入 @Tool 方法。
+    // Day 8 改动：stockTools 不再返回硬编码 Mock，改为通过 MarketDataGateway 获取受控数据。
     // 注册后，LLM 就知道"我可以调 getStockPrice / getFundamental 获取数据"，
     // 并在需要时自动发起 tool_use → 框架调 Java → 结果塞回对话 → LLM 继续。
     @Bean
