@@ -7,6 +7,7 @@
 - LangGraph4j 1.8.26 stable
 - No Spring AI
 - No beta/snapshot dependencies unless explicitly isolated in a temporary experiment and never merged into the main path.
+- Day 9 MCP：因 `langchain4j-mcp` 仅有 beta 版，Day 9 的 MCP Server/Client 采用自研实现（基于 webflux + JDK），**不引入任何 beta 依赖**。
 
 ## 2. Architecture Rules
 - Controller only handles transport concerns.

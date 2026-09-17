@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Day 8 · Lianghua Agent 端到端数据流</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2a3340;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --accent-2: #7ee787;
+    --warn: #d29922;
+    --danger: #f85149;
+    --tool: #bc8cff;
+    --llm: #ff7b72;
+    --cache: #3fb950;
+    --io: #d2a8ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #11161d, #0f1419);
+  }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .legend {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    padding: 12px 28px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .legend .dot {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 2px; margin-right: 6px; vertical-align: middle;
+  }
+  .wrap { display: flex; height: calc(100vh - 108px); }
+  .canvas {
+    flex: 1; overflow: auto; padding: 24px;
+    background:
+      radial-gradient(circle at 1px 1px, #1e2630 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+  svg { display: block; }
+  .node {
+    cursor: pointer;
+    transition: filter .15s, transform .15s;
+  }
+  .node:hover { filter: brightness(1.25); }
+  .node.dim { opacity: 0.22; }
+  .node .box { stroke-width: 1.5; }
+  .node.focus .box { stroke-width: 3; stroke: var(--accent); }
+  .node .label { font-size: 12.5px; font-weight: 600; fill: var(--text); pointer-events: none; }
+  .node .sublabel { font-size: 10.5px; fill: var(--muted); pointer-events: none; }
+  .edge { stroke: #3a4453; stroke-width: 1.4; fill: none; }
+  .edge.highlight { stroke: var(--accent); stroke-width: 2.4; }
+  .edge.dim { opacity: 0.18; }
+  .edge.muted { stroke-dasharray: 4 3; }
+  .arrow { fill: #3a4453; }
+  .arrow.highlight { fill: var(--accent); }
+  .edgeLabel { font-size: 9.5px; fill: var(--muted); }
+  .edgeLabel.highlight { fill: var(--accent); font-weight: 600; }
+
+  .side {
+    width: 380px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    overflow-y: auto;
+  }
+  .side .sec { padding: 16px 18px; border-bottom: 1px solid var(--border); }
+  .side h3 {
+    margin: 0 0 10px; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--accent);
+  }
+  .side h3 .badge {
+    background: var(--accent); color: #0b1118;
+    padding: 1px 7px; border-radius: 10px; font-size: 10.5px; margin-left: 6px;
+  }
+  .kv { font-size: 12.5px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { color: var(--text); }
+  .kv .v.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-2); }
+  ul.steps { margin: 0; padding-left: 18px; font-size: 12.5px; }
+  ul.steps li { margin-bottom: 6px; }
+  ul.steps .num { color: var(--accent); font-weight: 700; }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 10.5px; font-weight: 600; margin-right: 5px;
+  }
+  .pill.cache { background: rgba(63,185,80,.18); color: var(--cache); }
+  .pill.io { background: rgba(210,168,255,.18); color: var(--io); }
+  .pill.deg { background: rgba(210,153,34,.18); color: var(--warn); }
+  .pill.ok { background: rgba(88,166,255,.16); color: var(--accent); }
+  .hint { font-size: 11.5px; color: var(--muted); }
+  .scenario-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+  .scenario-tabs button {
+    background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 11px; font-size: 11.5px; cursor: pointer;
+  }
+  .scenario-tabs button.active {
+    color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600;
+  }
+  .gate-step { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .gate-step .arrow-right { color: var(--muted); }
+  .gate-step.outcome-ok { color: var(--cache); }
+  .gate-step.outcome-deg { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Day 8 · Finance Data Tooling — 端到端数据流</h1>
+  <div class="sub">一次 HTTP 请求 = 图执行 + LLM 决策 + 受控外部 I/O（限流 → 缓存 → Adapter → 降级）· 点击节点查看详情</div>
+</header>
+<div class="legend">
+  <span><span class="dot" style="background:#58a6ff"></span>图编排 (LangGraph4j)</span>
+  <span><span class="dot" style="background:#ff7b72"></span>LLM 决策</span>
+  <span><span class="dot" style="background:#bc8cff"></span>@Tool 应用层</span>
+  <span><span class="dot" style="background:#3fb950"></span>缓存 / 限流</span>
+  <span><span class="dot" style="background:#d2a8ff"></span>外部 I/O</span>
+  <span><span class="dot" style="background:#d29922"></span>降级兜底</span>
+</div>
+<div class="wrap">
+  <div class="canvas">
+    <svg id="flow" viewBox="0 0 1100 780" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker>
+        <marker id="a-hi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow highlight"/></marker>
+      </defs>
+
+      <!-- ===== Layer 1: HTTP entry ===== -->
+      <g class="node" data-id="browser">
+        <rect class="box" x="20" y="20" width="130" height="46" rx="8" fill="#1b2330" stroke="#3a4453"/>
+        <text class="label" x="85" y="42" text-anchor="middle">浏览器 / 调用方</text>
+        <text class="sublabel" x="85" y="56" text-anchor="middle">GET /api/v1/graph/analyze</text>
+      </g>
+      <g class="node" data-id="controller">
+        <rect class="box" x="200" y="20" width="160" height="46" rx="8" fill="#1b2330" stroke="#58a6ff"/>
+        <text class="label" x="280" y="42" text-anchor="middle">GraphController</text>
+        <text class="sublabel" x="280" y="56" text-anchor="middle">传输层 · 接请求，返结果</text>
+      </g>
+      <path class="edge" d="M150,43 L200,43" marker-end="url(#a)"/>
+
+      <!-- ===== Layer 2: Graph runtime ===== -->
+      <g class="node" data-id="runner">
+        <rect class="box" x="200" y="110" width="160" height="46" rx="8" fill="#1b2330" stroke="#58a6ff"/>
+        <text class="label" x="280" y="132" text-anchor="middle">GraphRunner</text>
+        <text class="sublabel" x="280" y="146" text-anchor="middle">compile + invoke 入口</text>
+      </g>
+      <path class="edge" d="M280,66 L280,110" marker-end="url(#a)"/>
+
+      <g class="node" data-id="stategraph">
+        <rect class="box" x="200" y="200" width="160" height="46" rx="8" fill="#1b2330" stroke="#58a6ff"/>
+        <text class="label" x="280" y="222" text-anchor="middle">QuantAgentStateGraph</text>
+        <text class="sublabel" x="280" y="236" text-anchor="middle">Day4 拓扑 · 图的心脏</text>
+      </g>
+      <path class="edge" d="M280,156 L280,200" marker-end="url(#a)"/>
+
+      <!-- ===== Layer 3: Nodes ===== -->
+      <g class="node" data-id="analysis">
+        <rect class="box" x="200" y="300" width="160" height="50" rx="8" fill="#2a1b22" stroke="#ff7b72"/>
+        <text class="label" x="280" y="322" text-anchor="middle">AnalysisNode</text>
+        <text class="sublabel" x="280" y="338" text-anchor="middle">LLM 决策 · 写 NEEDS_TOOL</text>
+      </g>
+      <path class="edge" d="M280,246 L280,300" marker-end="url(#a)"/>
+
+      <!-- conditional edge -->
+      <g class="node" data-id="route" data-shape="diamond">
+        <polygon points="280,388 330,410 280,432 230,410" fill="#1b2330" stroke="#58a6ff"/>
+        <text class="label" x="280" y="406" text-anchor="middle" font-size="11">needsTool?</text>
+        <text class="sublabel" x="280" y="420" text-anchor="middle" font-size="9.5">条件边路由</text>
+      </g>
+      <path class="edge" d="M280,350 L280,388" marker-end="url(#a)"/>
+
+      <!-- tool node -->
+      <g class="node" data-id="tool">
+        <rect class="box" x="430" y="300" width="170" height="50" rx="8" fill="#241b33" stroke="#bc8cff"/>
+        <text class="label" x="515" y="322" text-anchor="middle">ToolNode</text>
+        <text class="sublabel" x="515" y="338" text-anchor="middle">调 @Tool · 写 TOOL_DATA</text>
+      </g>
+      <path class="edge" id="e-route-tool" d="M330,410 L430,350" marker-end="url(#a)"/>
+      <text class="edgeLabel" x="385" y="378">true</text>
+
+      <!-- output node -->
+      <g class="node" data-id="output">
+        <rect class="box" x="430" y="490" width="170" height="50" rx="8" fill="#1b2330" stroke="#58a6ff"/>
+        <text class="label" x="515" y="512" text-anchor="middle">OutputNode</text>
+        <text class="sublabel" x="515" y="528" text-anchor="middle">确定性汇总 · 写 FINAL_RESULT</text>
+      </g>
+      <path class="edge" id="e-tool-output" d="M515,350 L515,490" marker-end="url(#a)"/>
+      <path class="edge" id="e-route-output" d="M230,410 L430,510" marker-end="url(#a)"/>
+      <text class="edgeLabel" x="310" y="478">false</text>
+
+      <!-- ===== Layer 4: Application @Tool ===== -->
+      <g class="node" data-id="stocktools">
+        <rect class="box" x="690" y="300" width="180" height="50" rx="8" fill="#241b33" stroke="#bc8cff"/>
+        <text class="label" x="780" y="322" text-anchor="middle">StockTools (@Tool)</text>
+        <text class="sublabel" x="780" y="338" text-anchor="middle">能力声明 · 薄适配层</text>
+      </g>
+      <path class="edge" id="e-tool-st" d="M600,325 L690,325" marker-end="url(#a)"/>
+
+      <!-- ===== Layer 5: Gateway orchestration ===== -->
+      <g class="node" data-id="gateway">
+        <rect class="box" x="690" y="410" width="180" height="50" rx="8" fill="#1d2a1f" stroke="#3fb950"/>
+        <text class="label" x="780" y="432" text-anchor="middle">MarketDataGateway</text>
+        <text class="sublabel" x="780" y="446" text-anchor="middle">编排中心 · 限流→缓存→I/O→降级</text>
+      </g>
+      <path class="edge" id="e-st-gw" d="M780,350 L780,410" marker-end="url(#a)"/>
+
+      <!-- Gateway internal chain -->
+      <g class="node" data-id="ratelimiter">
+        <rect class="box" x="690" y="520" width="150" height="42" rx="7" fill="#1d2a1f" stroke="#3fb950"/>
+        <text class="label" x="765" y="538" text-anchor="middle">RateLimiter</text>
+        <text class="sublabel" x="765" y="552" text-anchor="middle">令牌桶 · JDK 原生</text>
+      </g>
+      <path class="edge" id="e-gw-rl" d="M765,460 L765,520" marker-end="url(#a)"/>
+
+      <g class="node" data-id="cache">
+        <rect class="box" x="870" y="520" width="150" height="42" rx="7" fill="#1d2a1f" stroke="#3fb950"/>
+        <text class="label" x="945" y="538" text-anchor="middle">MarketDataCache</text>
+        <text class="sublabel" x="945" y="552" text-anchor="middle">TTL 缓存 · JDK 原生</text>
+      </g>
+      <path class="edge" id="e-rl-cache" d="M840,541 L870,541" marker-end="url(#a)"/>
+      <text class="edgeLabel" x="843" y="535" text-anchor="middle">通过</text>
+
+      <g class="node" data-id="adapter">
+        <rect class="box" x="870" y="610" width="150" height="42" rx="7" fill="#2a2340" stroke="#d2a8ff"/>
+        <text class="label" x="945" y="628" text-anchor="middle">EastMoneyAdapter</text>
+        <text class="sublabel" x="945" y="642" text-anchor="middle">WebClient · timeout · fallback</text>
+      </g>
+      <path class="edge" id="e-cache-adapter" d="M945,562 L945,610" marker-end="url(#a)"/>
+      <text class="edgeLabel" x="958" y="588">未命中</text>
+
+      <g class="node" data-id="extapi">
+        <rect class="box" x="870" y="700" width="150" height="42" rx="7" fill="#2a2340" stroke="#d2a8ff"/>
+        <text class="label" x="945" y="718" text-anchor="middle">东方财富 API</text>
+        <text class="sublabel" x="945" y="732" text-anchor="middle">外部 HTTP · 真实数据源</text>
+      </g>
+      <path class="edge" id="e-adapter-ext" d="M945,652 L945,700" marker-end="url(#a)"/>
+
+      <!-- Fallback path -->
+      <g class="node" data-id="fallback">
+        <rect class="box" x="690" y="610" width="150" height="42" rx="7" fill="#2a2410" stroke="#d29922"/>
+        <text class="label" x="765" y="628" text-anchor="middle">降级兜底</text>
+        <text class="sublabel" x="765" y="642" text-anchor="middle">lastKnownGood / Mock + degraded</text>
+      </g>
+      <path class="edge muted" id="e-rl-fb" d="M740,540 L710,610" marker-end="url(#a)"/>
+      <text class="edgeLabel" x="700" y="578">限流</text>
+      <path class="edge muted" id="e-adapter-fb" d="M870,631 L840,631" marker-end="url(#a)"/>
+      <text class="edgeLabel" x="855" y="622" text-anchor="end">异常</text>
+
+      <!-- ===== State (shared context) ===== -->
+      <g class="node" data-id="state">
+        <rect class="box" x="20" y="490" width="150" height="130" rx="8" fill="#161b22" stroke="#58a6ff" stroke-dasharray="4 3"/>
+        <text class="label" x="95" y="512" text-anchor="middle">QuantAgentState</text>
+        <text class="sublabel" x="95" y="530" text-anchor="middle">Map&lt;String,Object&gt;</text>
+        <line x1="30" y1="540" x2="160" y2="540" stroke="#2a3340"/>
+        <text class="sublabel" x="95" y="556" text-anchor="middle" font-size="10">· symbol</text>
+        <text class="sublabel" x="95" y="570" text-anchor="middle" font-size="10">· analysisResult</text>
+        <text class="sublabel" x="95" y="584" text-anchor="middle" font-size="10">· needsTool</text>
+        <text class="sublabel" x="95" y="598" text-anchor="middle" font-size="10">· toolData</text>
+        <text class="sublabel" x="95" y="612" text-anchor="middle" font-size="10">· finalResult</text>
+      </g>
+      <text class="edgeLabel" x="155" y="300" text-anchor="middle" font-size="10">节点读写</text>
+      <path class="edge muted" d="M150,500 L200,350" marker-end="url(#a)"/>
+      <path class="edge muted" d="M150,560 L430,340" marker-end="url(#a)"/>
+      <path class="edge muted" d="M150,600 L430,510" marker-end="url(#a)"/>
+
+      <!-- ===== Title labels ===== -->
+      <text x="280" y="12" fill="#8b949e" font-size="10" font-weight="600" text-anchor="middle">图编排层 (LangGraph4j)</text>
+      <text x="780" y="292" fill="#8b949e" font-size="10" font-weight="600" text-anchor="middle">工程护栏层 (Day 8)</text>
+    </svg>
+  </div>
+
+  <!-- ===== Side panel ===== -->
+  <div class="side" id="panel">
+    <div class="sec">
+      <h3>操作</h3>
+      <div class="scenario-tabs">
+        <button class="active" data-scenario="happy">① 理想路径</button>
+        <button data-scenario="cached">② 缓存命中</button>
+        <button data-scenario="limited">③ 限流降级</button>
+        <button data-scenario="failed">④ 外部失败</button>
+      </div>
+      <p class="hint">点击左侧任意节点查看源码职责与字段。切换场景高亮不同数据路径。</p>
+    </div>
+    <div id="detail"></div>
+  </div>
+</div>
+<script>
+const NODES = {
+  browser: {
+    title: '浏览器 / 调用方', color: '#58a6ff',
+    desc: '发起 HTTP 请求，传入 symbol 参数。',
+    detail: '<div class="kv"><span class="k">入口：</span><span class="v code">GET /api/v1/graph/analyze?symbol=600519</span></div>'
+  },
+  controller: {
+    title: 'GraphController', color: '#58a6ff',
+    desc: '传输层。只做参数接收与结果返回，不参与业务逻辑。',
+    detail: '<div class="kv"><span class="k">职责：</span><span class="v">接 HTTP 请求，调 graphRunner.runDay4(symbol)，把 finalResult() 作为响应体返回。</span></div><div class="kv"><span class="k">原则：</span><span class="v">Controller 不碰图细节（compile/invoke 异常由 Runner 封装）。</span></div>'
+  },
+  runner: {
+    title: 'GraphRunner', color: '#58a6ff',
+    desc: '图执行统一入口，封装 compile + invoke。',
+    detail: '<div class="kv"><span class="k">runDay4(symbol)：</span><span class="v">compileDay4() → compiledGraph.invoke(Map.of(SYMBOL, symbol)) → 返回 finalState。</span></div><div class="kv"><span class="k">为什么每次 compile：</span><span class="v">学习期选择"每次反映最新代码"；生产通常启动时 compile 一次缓存。</span></div>'
+  },
+  stategraph: {
+    title: 'QuantAgentStateGraph', color: '#58a6ff',
+    desc: '图的心脏。Day4 拓扑：固定流程 analysis → tool → output。',
+    detail: '<div class="kv"><span class="k">节点：</span><span class="v code">ANALYSIS / TOOL / OUTPUT</span></div><div class="kv"><span class="k">条件边：</span><span class="v">analysis 之后按 state.needsTool() 路由到 TOOL 或 OUTPUT。</span></div>'
+  },
+  analysis: {
+    title: 'AnalysisNode', color: '#ff7b72',
+    desc: '调 LLM 做决策，把结果写入 State。',
+    detail: '<ul class="steps"><li><span class="num">1.</span> 调 StockAnalysisAiService（LangChain4j AiServices）</li><li><span class="num">2.</span> LLM 返回结构化分析（操作/评分/理由）</li><li><span class="num">3.</span> 写 <span class="code">ANALYSIS_RESULT</span></li><li><span class="num">4.</span> 写 <span class="code">NEEDS_TOOL</span> = (评分 ≥ 7.0)</li></ul>'
+  },
+  route: {
+    title: '条件边路由', color: '#58a6ff',
+    desc: '读 state.needsTool() 决定下一站。',
+    detail: '<div class="kv"><span class="k">true：</span><span class="v code">→ ToolNode（需要数据）</span></div><div class="kv"><span class="k">false：</span><span class="v code">→ OutputNode（直接汇总）</span></div>'
+  },
+  tool: {
+    title: 'ToolNode', color: '#bc8cff',
+    desc: '驱动 @Tool 方法执行，把工具结果写入 State。',
+    detail: '<div class="kv"><span class="k">调用：</span><span class="v">StockTools.getStockPrice() / getFundamental()</span></div><div class="kv"><span class="k">写入：</span><span class="v code">TOOL_DATA = JSON 字符串（给 LLM 阅读）</span></div>'
+  },
+  output: {
+    title: 'OutputNode', color: '#58a6ff',
+    desc: '纯确定性汇总，不调用 LLM。',
+    detail: '<div class="kv"><span class="k">写入：</span><span class="v code">FINAL_RESULT = 分析 + 数据 拼接文本</span></div><div class="kv"><span class="k">特点：</span><span class="v">无 LLM 调用，100% 可重放。</span></div>'
+  },
+  stocktools: {
+    title: 'StockTools (@Tool)', color: '#bc8cff',
+    desc: 'LLM 能"伸手"调的 Java 方法集合。Day 8 从 Mock 升级为调 Gateway。',
+    detail: '<div class="kv"><span class="k">方法：</span><span class="v code">getStockPrice / getFundamental</span></div><div class="kv"><span class="k">Day 8 变化：</span><span class="v">注入 MarketDataGateway，不再返回硬编码 Mock。</span></div><div class="kv"><span class="k">接口稳定：</span><span class="v">@Tool 签名不变 → DataFetchTaskHandler 无感。</span></div>'
+  },
+  gateway: {
+    title: 'MarketDataGateway', color: '#3fb950',
+    desc: '编排中心：限流 → 缓存 → Adapter → 降级（从便宜到昂贵的漏斗）。',
+    detail: '<div class="kv"><span class="k">第 1 道：</span><span class="v">RateLimiter.tryAcquire()</span></div><div class="kv"><span class="k">第 2 道：</span><span class="v">MarketDataCache.getString(key)</span></div><div class="kv"><span class="k">第 3 道：</span><span class="v">EastMoneyAdapter.fetchXxx()</span></div><div class="kv"><span class="k">第 4 道：</span><span class="v">降级 → lastKnownGood / Mock + degraded=true</span></div>'
+  },
+  ratelimiter: {
+    title: 'RateLimiter', color: '#3fb950',
+    desc: '令牌桶限流，JDK 原生实现（零新增依赖）。',
+    detail: '<div class="kv"><span class="k">策略：</span><span class="v">tryAcquire() 快速拒绝，超限不阻塞。</span></div><div class="kv"><span class="k">超限行为：</span><span class="v">Gateway 返回缓存（即使可能过期）或降级响应。</span></div>'
+  },
+  cache: {
+    title: 'MarketDataCache', color: '#3fb950',
+    desc: 'TTL 缓存，JDK 原生 ConcurrentHashMap 实现。',
+    detail: '<div class="kv"><span class="k">key：</span><span class="v code">"price:600519" / "fundamental:600519"</span></div><div class="kv"><span class="k">特性：</span><span class="v">TTL 过期、最大条目淘汰、命中率统计、invalidate。</span></div>'
+  },
+  adapter: {
+    title: 'EastMoneyAdapter', color: '#d2a8ff',
+    desc: '东财数据源适配器：WebClient + 超时 + fallback。',
+    detail: '<div class="kv"><span class="k">I/O：</span><span class="v">非阻塞 WebClient 请求东方财富接口。</span></div><div class="kv"><span class="k">容错：</span><span class="v">超时/异常时返回 degraded 数据，不向上抛。</span></div>'
+  },
+  extapi: {
+    title: '东方财富 API', color: '#d2a8ff',
+    desc: '外部真实数据源。',
+    detail: '<div class="kv"><span class="k">数据：</span><span class="v">实时行情价格、基本面（PE/PB/行业）。</span></div><div class="kv"><span class="k">风险：</span><span class="v">网络抖动、限流、字段缺失 → 由 Adapter 兜底。</span></div>'
+  },
+  fallback: {
+    title: '降级兜底', color: '#d29922',
+    desc: 'Adapter 失败或限流时的最后防线。',
+    detail: '<div class="kv"><span class="k">优先级：</span><span class="v">lastKnownGood（上次成功数据）&gt; 确定性 Mock</span></div><div class="kv"><span class="k">标记：</span><span class="v code">degraded=true → LLM 知道"这不是实时数据"</span></div>'
+  },
+  state: {
+    title: 'QuantAgentState', color: '#58a6ff',
+    desc: '节点间流转的"共享行李箱"，继承 LangGraph4j AgentState（Map）。',
+    detail: '<div class="kv"><span class="k">本质：</span><span class="v">Map&lt;String,Object&gt; + 类型化 accessor</span></div><div class="kv"><span class="k">不可变语义：</span><span class="v">节点返回增量 Map，框架 merge 成新 State。</span></div><div class="kv"><span class="k">支撑：</span><span class="v">Day7 Checkpoint 序列化 / Day14 HITL 改状态</span></div>'
+  }
+};
+
+const SCENARIOS = {
+  happy: {
+    label: '① 理想路径：限流通过 → 缓存未命中 → Adapter 成功 → 真实数据',
+    nodes: ['browser','controller','runner','stategraph','analysis','route','tool','output','stocktools','gateway','ratelimiter','cache','adapter','extapi','state'],
+    edges: ['e-route-tool','e-tool-output','e-tool-st','e-st-gw','e-gw-rl','e-rl-cache','e-cache-adapter','e-adapter-ext'],
+    note: '数据沿完整漏斗走到底，拿到真实行情写入 TOOL_DATA，最终 OutputNode 汇总。'
+  },
+  cached: {
+    label: '② 缓存命中：限流通过 → 缓存命中 → 直接返回（零 I/O）',
+    nodes: ['browser','controller','runner','stategraph','analysis','route','tool','output','stocktools','gateway','ratelimiter','cache','state'],
+    edges: ['e-route-tool','e-tool-output','e-tool-st','e-st-gw','e-gw-rl','e-rl-cache'],
+    note: 'MarketDataCache 命中 → 直接返回 JSON，不调 Adapter。最省令牌、最省网络。'
+  },
+  limited: {
+    label: '③ 限流降级：RateLimiter 超限 → 返回缓存/降级响应',
+    nodes: ['browser','controller','runner','stategraph','analysis','route','tool','output','stocktools','gateway','ratelimiter','fallback','state'],
+    edges: ['e-route-tool','e-tool-output','e-tool-st','e-st-gw','e-gw-rl','e-rl-fb'],
+    note: 'RateLimiter.tryAcquire() = false → Gateway 走降级：优先缓存，否则 lastKnownGood/Mock + degraded=true。'
+  },
+  failed: {
+    label: '④ 外部失败：Adapter 异常 → 降级兜底（lastKnownGood / Mock）',
+    nodes: ['browser','controller','runner','stategraph','analysis','route','tool','output','stocktools','gateway','ratelimiter','cache','adapter','fallback','state'],
+    edges: ['e-route-tool','e-tool-output','e-tool-st','e-st-gw','e-gw-rl','e-rl-cache','e-cache-adapter','e-adapter-fb'],
+    note: '东方财富 API 超时/异常 → Adapter 抛 → Gateway catch → 降级到 lastKnownGood 或确定性 Mock。'
+  }
+};
+
+let activeScenario = 'happy';
+let focusNode = null;
+
+function renderDetail(id) {
+  const n = NODES[id];
+  if (!n) return;
+  document.getElementById('detail').innerHTML = `
+    <div class="sec">
+      <h3>${n.title} <span class="badge" style="background:${n.color};color:#0b1118">源码</span></h3>
+      <p class="hint" style="margin-top:0">${n.desc}</p>
+      ${n.detail}
+    </div>
+    <div class="sec">
+      <h3>当前场景</h3>
+      <p class="hint">${SCENARIOS[activeScenario].label}</p>
+      <p style="font-size:12.5px;margin-top:8px">${SCENARIOS[activeScenario].note}</p>
+    </div>`;
+}
+
+function applyScenario() {
+  const s = SCENARIOS[activeScenario];
+  const activeNodes = new Set(s.nodes);
+  const activeEdges = new Set(s.edges);
+  document.querySelectorAll('.node').forEach(el => {
+    el.classList.toggle('dim', !activeNodes.has(el.dataset.id));
+    el.classList.remove('focus');
+  });
+  document.querySelectorAll('.edge').forEach(el => {
+    const on = activeEdges.has(el.id);
+    el.classList.toggle('dim', !on);
+    el.classList.toggle('highlight', on);
+  });
+  document.querySelectorAll('.arrow').forEach(el => el.classList.remove('highlight'));
+  if (focusNode && activeNodes.has(focusNode)) {
+    document.querySelector(`.node[data-id="${focusNode}"]`).classList.add('focus');
+    renderDetail(focusNode);
+  } else {
+      document.getElementById('detail').innerHTML = `
+    <div class="sec"><h3>当前场景</h3>
+    <p class="hint" style="margin-top:0">${s.label}</p>
+    <p style="font-size:12.5px;margin-top:8px">${s.note}</p></div>
+    <div class="sec"><h3>提示</h3><p class="hint">点击左侧任意节点查看源码职责与字段详情。</p></div>`;
+  }
+}
+
+document.querySelectorAll('.node').forEach(el => {
+  el.addEventListener('click', () => {
+    focusNode = el.dataset.id;
+    applyScenario();
+  });
+});
+
+document.querySelectorAll('.scenario-tabs button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.scenario-tabs button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    activeScenario = b.dataset.scenario;
+    applyScenario();
+  });
+});
+
+applyScenario();
+</script>
+</body>
+</html>

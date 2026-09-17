@@ -1,5 +1,6 @@
 package com.quant.agent.infrastructure.llm;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
 import com.quant.agent.application.planner.PlannerAiService;
@@ -7,6 +8,9 @@ import com.quant.agent.application.planner.PlannerService;
 import com.quant.agent.application.render.RenderAiService;
 import com.quant.agent.application.tool.StockTools;
 import com.quant.agent.graph.handlers.TaskHandler;
+import com.quant.agent.infrastructure.mcp.McpServer;
+import com.quant.agent.infrastructure.mcp.McpToolBridge;
+import com.quant.agent.infrastructure.mcp.protocol.ImplementationInfo;
 import com.quant.agent.infrastructure.tool.EastMoneyAdapter;
 import com.quant.agent.infrastructure.tool.MarketDataCache;
 import com.quant.agent.infrastructure.tool.MarketDataGateway;
@@ -239,10 +243,44 @@ public class AiServicesConfiguration {
         return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
     }
 
-    // ---- 第 3 层：运行入口（一键开工）-------------------------------
-
+    // ---- 第 3 层：Day 5 运行入口（PlannerController 依赖此 Bean，名为 graphRunnerDay5）----
+    // 修复 Day 5 遗漏：之前只注册了 Day 4 的 graphRunner，PlannerController 注入 @Qualifier("graphRunnerDay5") 找不到 Bean。
     @Bean
     public GraphRunner graphRunnerDay5(QuantAgentStateGraph quantAgentStateGraphDay5) {
         return new GraphRunner(quantAgentStateGraphDay5);
+    }
+
+    // ========================================================================
+    // Day 9：MCP Server —— 把 StockTools 能力通过 MCP 协议暴露给外部 Host
+    // ========================================================================
+
+    /**
+     * Day 9：ObjectMapper Bean —— MCP 协议序列化共用。
+     *
+     * <p>Spring Boot webflux 默认不暴露 ObjectMapper 为 Bean，McpToolBridge/McpServer/McpClient 需要注入。
+     */
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
+    }
+
+    /**
+     * Day 9：MCP 工具桥接器 —— 反射 StockTools 的 @Tool 方法，生成 MCP 工具定义。
+     */
+    @Bean
+    public McpToolBridge mcpToolBridge(StockTools stockTools, ObjectMapper objectMapper) {
+        return new McpToolBridge(stockTools, objectMapper);
+    }
+
+    /**
+     * Day 9：MCP Server 核心 —— 注册 StockTools 工具，处理 JSON-RPC 请求。
+     */
+    @Bean
+    public McpServer mcpServer(McpToolBridge mcpToolBridge, ObjectMapper objectMapper) {
+        McpServer server = new McpServer(objectMapper, new ImplementationInfo("lianghua-agent", "1.0.0"));
+        // 把 bridge 扫描到的所有 @Tool 方法注册为 MCP 工具
+        mcpToolBridge.buildToolBindings().forEach(binding ->
+                server.registerTool(binding.definition(), binding.executor()));
+        return server;
     }
 }
