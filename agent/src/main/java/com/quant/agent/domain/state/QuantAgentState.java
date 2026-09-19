@@ -151,4 +151,20 @@ public class QuantAgentState extends AgentState {
     public String renderedResult() {
         return (String) value(StateKeys.RENDERED_RESULT).orElse(null);
     }
+
+    // ========================================================================
+    // Day 10 新增 accessor（DiffAuditNode 使用的字段）
+    // ========================================================================
+
+    /** DiffAuditNode 的缺口矩阵 */
+    @SuppressWarnings("unchecked")
+    public com.quant.agent.domain.audit.GapMatrix gapMatrix() {
+        return (com.quant.agent.domain.audit.GapMatrix) value(StateKeys.GAP_MATRIX)
+                .orElse(com.quant.agent.domain.audit.GapMatrix.EMPTY);
+    }
+
+    /** DiffAuditNode 的审计是否通过 */
+    public boolean auditPassed() {
+        return Boolean.TRUE.equals(value(StateKeys.AUDIT_PASSED).orElse(false));
+    }
 }

@@ -4,6 +4,7 @@ import com.quant.agent.domain.state.QuantAgentState;
 import com.quant.agent.domain.task.Task;
 import com.quant.agent.domain.task.TaskType;
 import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.DiffAuditNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
@@ -199,49 +200,88 @@ class QuantAgentStateGraphTest {
     }
 
     // ========================================================================
-    // 【Day 6 · 正式测试】终止策略：重规划耗尽后直接走 END，不经过 render
+    // 【Day 10 · 正式测试】差分审计：review pass → diffAudit → render 或 END
     // ========================================================================
-    // Day 6 核心改动验证：
-    //   reviewNode 诚实返回 fail（不再强制 pass）
-    //   条件边路由函数读 planAttempt >= MAX → 直接 return END
-    //   图终止，不经过 renderNode
+    // Day 10 核心改动验证：
+    //   review pass → diffAudit 节点（不再直接走 render）
+    //   diffAudit pass → render → END
+    //   diffAudit fail → END（阻断）
     @Test
-    void shouldTerminateDirectlyToEndWhenReplanExhausted() throws Exception {
+    void shouldRouteToDiffAuditAfterReviewPasses() throws Exception {
         List<Task> tasks = List.of(Task.of(TaskType.ANALYSIS, "600519"));
 
-        // 真实 PlannerNode（planAttempt 会真实累加：1→2→3）
-        com.quant.agent.application.planner.PlannerService plannerService =
-                mock(com.quant.agent.application.planner.PlannerService.class);
-        when(plannerService.plan(any())).thenReturn(tasks);
-        PlannerNode plannerNode = new PlannerNode(plannerService);
+        PlannerNode plannerNode = mock(PlannerNode.class);
+        when(plannerNode.apply(any())).thenReturn(Map.of("tasks", tasks, "planAttempt", 1));
 
-        // executor 每次 results 都含"失败" → reviewNode 诚实返回 fail
         ExecutorNode executorNode = mock(ExecutorNode.class);
-        when(executorNode.apply(any())).thenReturn(Map.of(
-                "results", Map.of("ANALYSIS", "分析失败: LLM 超时")));
+        when(executorNode.apply(any())).thenReturn(Map.of("results", Map.of("ANALYSIS", "ok")));
 
-        // 真实 ReviewNode（Day 6 改动后：诚实审查，不强制 pass）
-        ReviewNode reviewNode = new ReviewNode();
+        // review 返回 pass
+        ReviewNode reviewNode = mock(ReviewNode.class);
+        when(reviewNode.apply(any())).thenReturn(Map.of("reviewResult", "pass"));
 
-        // renderNode：如果终止策略正确，这个节点永远不会被调到
+        // diffAudit 返回通过（无 CRITICAL）
+        DiffAuditNode diffAuditNode = mock(DiffAuditNode.class);
+        when(diffAuditNode.apply(any())).thenReturn(Map.of(
+                "auditPassed", true,
+                "gapMatrix", com.quant.agent.domain.audit.GapMatrix.EMPTY));
+
         RenderNode renderNode = mock(RenderNode.class);
         when(renderNode.apply(any())).thenReturn(Map.of("renderedResult", "（渲染结果）"));
 
-        QuantAgentStateGraph graph = new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
+        QuantAgentStateGraph graph = new QuantAgentStateGraph(
+                plannerNode, executorNode, reviewNode, renderNode, diffAuditNode);
         CompiledGraph<QuantAgentState> compiled = graph.compileDay5();
 
         Optional<QuantAgentState> output = compiled.invoke(Map.of("symbol", "600519"));
 
         assertTrue(output.isPresent());
-        QuantAgentState finalState = output.get();
+        QuantAgentState state = output.get();
 
-        // 验证：最终 planAttempt = 3（规划了 3 次）
-        assertEquals(3, finalState.planAttempt(), "应规划了 3 次");
+        // 验证：review pass → diffAudit 被调用 → render 被调用
+        verify(diffAuditNode, times(1)).apply(any());
+        verify(renderNode, times(1)).apply(any());
+        // 验证：最终 auditPassed = true
+        assertTrue(state.auditPassed());
+    }
 
-        // 验证：最终 reviewResult = "fail"（诚实，不是伪造的 pass）
-        assertFalse(finalState.reviewPassed(), "最终 review 应是真实失败");
+    @Test
+    void shouldTerminateWhenDiffAuditFails() throws Exception {
+        List<Task> tasks = List.of(Task.of(TaskType.EXECUTE, "600519"));
 
-        // 验证：renderNode 从未被调用（直接走 END，不浪费渲染）
+        PlannerNode plannerNode = mock(PlannerNode.class);
+        when(plannerNode.apply(any())).thenReturn(Map.of("tasks", tasks, "planAttempt", 1));
+
+        ExecutorNode executorNode = mock(ExecutorNode.class);
+        when(executorNode.apply(any())).thenReturn(Map.of("results", Map.of("EXECUTE", "ok")));
+
+        // review 返回 pass
+        ReviewNode reviewNode = mock(ReviewNode.class);
+        when(reviewNode.apply(any())).thenReturn(Map.of("reviewResult", "pass"));
+
+        // diffAudit 返回不通过（有 CRITICAL 缺口）
+        DiffAuditNode diffAuditNode = mock(DiffAuditNode.class);
+        com.quant.agent.domain.audit.GapMatrix failedMatrix =
+                mock(com.quant.agent.domain.audit.GapMatrix.class);
+        when(failedMatrix.hasCritical()).thenReturn(true);
+        when(diffAuditNode.apply(any())).thenReturn(Map.of(
+                "auditPassed", false,
+                "gapMatrix", failedMatrix));
+
+        // render 不应该被调用
+        RenderNode renderNode = mock(RenderNode.class);
+        when(renderNode.apply(any())).thenReturn(Map.of("renderedResult", "（渲染结果）"));
+
+        QuantAgentStateGraph graph = new QuantAgentStateGraph(
+                plannerNode, executorNode, reviewNode, renderNode, diffAuditNode);
+        CompiledGraph<QuantAgentState> compiled = graph.compileDay5();
+
+        Optional<QuantAgentState> output = compiled.invoke(Map.of("symbol", "600519"));
+
+        assertTrue(output.isPresent());
+
+        // 验证：diffAudit fail → render 从未被调用（直接终止）
+        verify(diffAuditNode, times(1)).apply(any());
         verify(renderNode, never()).apply(any());
     }
 }

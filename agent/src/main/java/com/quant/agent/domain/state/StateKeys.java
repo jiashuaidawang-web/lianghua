@@ -72,4 +72,14 @@ public final class StateKeys {  // final：禁止继承
 
     /** RenderNode 的 LLM 润色结果（给人类用户看的自然语言文本） */
     public static final String RENDERED_RESULT = "renderedResult";
+
+    // ========================================================================
+    // Day 10 新增：DiffAuditNode 使用的 key
+    // ========================================================================
+
+    /** DiffAuditNode 的缺口矩阵（GapMatrix） */
+    public static final String GAP_MATRIX = "gapMatrix";
+
+    /** DiffAuditNode 的审计是否通过（boolean） */
+    public static final String AUDIT_PASSED = "auditPassed";
 }

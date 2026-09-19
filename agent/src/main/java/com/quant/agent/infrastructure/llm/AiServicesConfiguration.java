@@ -1,6 +1,7 @@
 package com.quant.agent.infrastructure.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.agent.application.audit.DiffAuditService;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
 import com.quant.agent.application.planner.PlannerAiService;
@@ -8,6 +9,7 @@ import com.quant.agent.application.planner.PlannerService;
 import com.quant.agent.application.render.RenderAiService;
 import com.quant.agent.application.tool.StockTools;
 import com.quant.agent.graph.handlers.TaskHandler;
+import com.quant.agent.infrastructure.audit.CapabilityInventory;
 import com.quant.agent.infrastructure.mcp.McpServer;
 import com.quant.agent.infrastructure.mcp.McpToolBridge;
 import com.quant.agent.infrastructure.mcp.protocol.ImplementationInfo;
@@ -16,6 +18,7 @@ import com.quant.agent.infrastructure.tool.MarketDataCache;
 import com.quant.agent.infrastructure.tool.MarketDataGateway;
 import com.quant.agent.infrastructure.tool.RateLimiter;
 import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.DiffAuditNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
@@ -26,6 +29,7 @@ import com.quant.agent.graph.runtime.GraphRunner;
 import com.quant.agent.graph.topology.QuantAgentStateGraph;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -234,13 +238,15 @@ public class AiServicesConfiguration {
 
     // ---- 第 2 层：图（把节点连起来）---------------------------------
     // Day 5 重构图拓扑：planner → executor → review →(pass→render→END / fail→planner)
+    // Day 10 改动：review 之后插入 diffAudit 节点
 
     @Bean
     public QuantAgentStateGraph quantAgentStateGraphDay5(PlannerNode plannerNode,
                                                          ExecutorNode executorNode,
                                                          ReviewNode reviewNode,
-                                                         RenderNode renderNode) {
-        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode);
+                                                         RenderNode renderNode,
+                                                         DiffAuditNode diffAuditNode) {
+        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode);
     }
 
     // ---- 第 3 层：Day 5 运行入口（PlannerController 依赖此 Bean，名为 graphRunnerDay5）----
@@ -251,8 +257,32 @@ public class AiServicesConfiguration {
     }
 
     // ========================================================================
-    // Day 9：MCP Server —— 把 StockTools 能力通过 MCP 协议暴露给外部 Host
+    // Day 10：DSH Diff Audit —— 差分审计能力（能力缺口审计）
     // ========================================================================
+
+    /**
+     * Day 10：CapabilityInventory Bean —— 能力清单扫描器（扫描本地 @Tool + 远端 MCP）。
+     */
+    @Bean
+    public CapabilityInventory capabilityInventory(ApplicationContext applicationContext) {
+        return new CapabilityInventory(applicationContext);
+    }
+
+    /**
+     * Day 10：DiffAuditService Bean —— 编排能力扫描 + Task 对比 + 产出 GapMatrix。
+     */
+    @Bean
+    public DiffAuditService diffAuditService(CapabilityInventory capabilityInventory) {
+        return new DiffAuditService(capabilityInventory);
+    }
+
+    /**
+     * Day 10：DiffAuditNode Bean —— 差分审计节点（接入图的"审计闸门"）。
+     */
+    @Bean
+    public DiffAuditNode diffAuditNode(DiffAuditService diffAuditService) {
+        return new DiffAuditNode(diffAuditService);
+    }
 
     /**
      * Day 9：ObjectMapper Bean —— MCP 协议序列化共用。

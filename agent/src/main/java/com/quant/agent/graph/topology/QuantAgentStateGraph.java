@@ -2,6 +2,7 @@ package com.quant.agent.graph.topology;
 
 import com.quant.agent.domain.state.QuantAgentState;
 import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.DiffAuditNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
@@ -87,6 +88,9 @@ public class QuantAgentStateGraph {
     public static final String REVIEW = "review";
     public static final String RENDER = "render";
 
+    // Day 10 节点
+    public static final String DIFF_AUDIT = "diffAudit";
+
     // -------------------------------------------------------------------------
     // Day 6：终止策略参数（重规划上限）
     // -------------------------------------------------------------------------
@@ -149,6 +153,7 @@ public class QuantAgentStateGraph {
     private ExecutorNode day5ExecutorNode;
     private ReviewNode day5ReviewNode;
     private RenderNode day5RenderNode;
+    private DiffAuditNode day5DiffAuditNode;
 
     /**
      * Day 5 构造器：注入 Day 5 的四个节点。
@@ -164,19 +169,47 @@ public class QuantAgentStateGraph {
     }
 
     /**
-     * Day 5 + Day 7 编译：动态规划 + 重规划循环 + 结果渲染 + Checkpoint 快照。
+     * Day 10 构造器：注入五个节点（新增 DiffAuditNode）。
+     *
+     * <p>拓扑：planner → executor → review → diffAudit →(pass)→ render → END
+     *                                               →(fail)→ END
+     */
+    public QuantAgentStateGraph(PlannerNode plannerNode, ExecutorNode executorNode,
+                                 ReviewNode reviewNode, RenderNode renderNode,
+                                 DiffAuditNode diffAuditNode) {
+        this.day5PlannerNode = plannerNode;
+        this.day5ExecutorNode = executorNode;
+        this.day5ReviewNode = reviewNode;
+        this.day5RenderNode = renderNode;
+        this.day5DiffAuditNode = diffAuditNode;
+    }
+
+    /**
+     * Day 5 + Day 7 + Day 10 编译：动态规划 + 重规划循环 + 结果渲染 + Checkpoint 快照 + 差分审计。
      *
      * <p>拓扑：
      * <pre>
-     *   START → planner → executor → review ──[attempt&lt;MAX &amp; pass]──→ render → END
+     *   START → planner → executor → review ──[attempt&lt;MAX &amp; pass]──→ diffAudit ──[pass]──→ render → END
      *                                ──[attempt&lt;MAX &amp; fail]──→ planner（重规划循环）
      *                                ──[attempt&gt;=MAX]────────→ END（直接终止）
+     *                                                          diffAudit ──[fail]──→ END
      * </pre>
      *
-     * <p>Day 7 改动：新增 {@link CompileConfig} + {@link BaseCheckpointSaver} 注入。
-     * 框架在每节点执行后自动调 saver.put() 存快照，无需手动调 save。
+     * <p>Day 10 改动：新增 {@link DiffAuditNode} 注入 + 审计条件边。
      *
      * @param checkpointSaver Checkpoint 存储实现（MemorySaver 测试用 / FileSystemSaver 单机 / Redis 生产）
+     * @param diffAuditNode   差分审计节点（Day 10 新增）
+     */
+    public CompiledGraph<QuantAgentState> compileDay5(BaseCheckpointSaver checkpointSaver,
+                                                       DiffAuditNode diffAuditNode) throws GraphStateException {
+        this.day5DiffAuditNode = diffAuditNode;
+        return compileDay5(checkpointSaver);
+    }
+
+    /**
+     * Day 5 + Day 7 编译（无 Checkpoint，兼容旧调用）。
+     *
+     * <p>保留无参版本，方便不需要快照的场景（如简单测试）。
      */
     public CompiledGraph<QuantAgentState> compileDay5(BaseCheckpointSaver checkpointSaver) throws GraphStateException {
         StateGraph<QuantAgentState> graph = new StateGraph<>(QuantAgentState::new);
@@ -187,6 +220,11 @@ public class QuantAgentStateGraph {
         graph.addNode(REVIEW, AsyncNodeAction.node_async(day5ReviewNode::apply));
         graph.addNode(RENDER, AsyncNodeAction.node_async(day5RenderNode::apply));
 
+        // Day 10：注册 DiffAuditNode（如果注入了的话）
+        if (day5DiffAuditNode != null) {
+            graph.addNode(DIFF_AUDIT, AsyncNodeAction.node_async(day5DiffAuditNode::apply));
+        }
+
         // 固定边：START→planner, planner→executor, executor→review, render→END
         graph.addEdge(START, PLANNER);
         graph.addEdge(PLANNER, EXECUTOR);
@@ -194,29 +232,56 @@ public class QuantAgentStateGraph {
         graph.addEdge(RENDER, END);
 
         // -----------------------------------------------------------------
-        // 条件边：reviewNode 之后的"智能岔口"（重规划循环 + 终止策略）
+        // 条件边：reviewNode 之后的"智能岔口"（重规划循环 + 终止策略 + 差分审计）
         // -----------------------------------------------------------------
         // Day 6 改动：终止策略从 reviewNode 移到条件边路由函数。
-        //   reviewNode 只管诚实审查（pass/fail），不管循环策略。
-        //   路由函数读 planAttempt，超限直接 return END，不再伪造 pass。
+        // Day 10 改动：review 不再直接决定 END/render，而是决定 重规划/diffAudit/render。
+        //   - 有 diffAudit 节点：pass → diffAudit，fail → planner，超限 → END
+        //   - 无 diffAudit 节点（兼容 Day 5）：pass → render，fail → planner，超限 → END
+        // 注意：路由表必须动态构建，只包含实际注册的节点（避免 LangGraph4j "not existent nodeId" 错误）。
+        java.util.Map<String, String> reviewRouteMap = new java.util.HashMap<>();
+        reviewRouteMap.put(RENDER, RENDER);
+        reviewRouteMap.put(PLANNER, PLANNER);
+        reviewRouteMap.put(END, END);
+        if (day5DiffAuditNode != null) {
+            reviewRouteMap.put(DIFF_AUDIT, DIFF_AUDIT);
+        }
         graph.addConditionalEdges(
                 REVIEW,
                 AsyncEdgeAction.edge_async(state -> {
-                    // 终止策略：重规划次数耗尽 → 直接走 END
                     int maxAttempt = MAX_PLAN_ATTEMPT;
                     if (state.planAttempt() >= maxAttempt) {
                         log.warn("重规划次数耗尽: attempt={}/{}, 直接终止", state.planAttempt(), maxAttempt);
                         return END;
                     }
-                    // 正常路由：pass → render，fail → planner（重规划）
                     boolean pass = state.reviewPassed();
-                    String route = pass ? RENDER : PLANNER;
-                    log.debug("Day5 条件边路由: reviewPassed={} → {}", pass, route);
-                    return route;
+                    if (day5DiffAuditNode != null) {
+                        // Day 10：有 diffAudit，pass → diffAudit，fail → planner
+                        String route = pass ? DIFF_AUDIT : PLANNER;
+                        log.debug("Day10 条件边路由: reviewPassed={} → {}", pass, route);
+                        return route;
+                    } else {
+                        // Day 5 兼容：pass → render，fail → planner
+                        String route = pass ? RENDER : PLANNER;
+                        log.debug("Day5 条件边路由: reviewPassed={} → {}", pass, route);
+                        return route;
+                    }
                 }),
-                // 路由表：pass → RENDER, fail → PLANNER, 终止 → END
-                Map.of(RENDER, RENDER, PLANNER, PLANNER, END, END)
+                reviewRouteMap
         );
+
+        // Day 10：diffAudit 之后的路由（pass → render，fail → END）
+        if (day5DiffAuditNode != null) {
+            graph.addConditionalEdges(
+                    DIFF_AUDIT,
+                    AsyncEdgeAction.edge_async(state -> {
+                        boolean passed = state.auditPassed();
+                        log.debug("Day10 diffAudit 路由: auditPassed={} → {}", passed, passed ? RENDER : END);
+                        return passed ? RENDER : END;
+                    }),
+                    Map.of(RENDER, RENDER, END, END)
+            );
+        }
 
         // -----------------------------------------------------------------
         // Day 7 改动：接入 CheckpointSaver，框架自动每节点存快照
