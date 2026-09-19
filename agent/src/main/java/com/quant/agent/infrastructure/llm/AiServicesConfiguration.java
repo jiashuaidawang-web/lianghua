@@ -2,17 +2,22 @@ package com.quant.agent.infrastructure.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.agent.application.audit.DiffAuditService;
+import com.quant.agent.application.sandbox.SandboxService;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
 import com.quant.agent.application.planner.PlannerAiService;
 import com.quant.agent.application.planner.PlannerService;
 import com.quant.agent.application.render.RenderAiService;
 import com.quant.agent.application.tool.StockTools;
+import com.quant.agent.graph.handlers.SandboxTaskHandler;
 import com.quant.agent.graph.handlers.TaskHandler;
 import com.quant.agent.infrastructure.audit.CapabilityInventory;
 import com.quant.agent.infrastructure.mcp.McpServer;
 import com.quant.agent.infrastructure.mcp.McpToolBridge;
 import com.quant.agent.infrastructure.mcp.protocol.ImplementationInfo;
+import com.quant.agent.infrastructure.sandbox.DockerSandboxExecutor;
+import com.quant.agent.infrastructure.sandbox.SandboxExecutor;
+import com.quant.agent.infrastructure.sandbox.SandboxProperties;
 import com.quant.agent.infrastructure.tool.EastMoneyAdapter;
 import com.quant.agent.infrastructure.tool.MarketDataCache;
 import com.quant.agent.infrastructure.tool.MarketDataGateway;
@@ -29,6 +34,7 @@ import com.quant.agent.graph.runtime.GraphRunner;
 import com.quant.agent.graph.topology.QuantAgentStateGraph;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -74,6 +80,8 @@ import java.util.List;
 // ============================================================================================
 
 @Configuration
+// Day 11：启用 SandboxProperties，把 quant.sandbox.* 绑定到 SandboxProperties
+@EnableConfigurationProperties(SandboxProperties.class)
 public class AiServicesConfiguration {
 
     // ========================================================================
@@ -282,6 +290,39 @@ public class AiServicesConfiguration {
     @Bean
     public DiffAuditNode diffAuditNode(DiffAuditService diffAuditService) {
         return new DiffAuditNode(diffAuditService);
+    }
+
+    // ========================================================================
+    // Day 11：Sandboxed Execution —— Docker 沙盒安全执行 LLM 生成的代码
+    // ========================================================================
+
+    /**
+     * Day 11：SandboxExecutor Bean —— 沙盒执行器。
+     *
+     * <p>默认使用 {@link DockerSandboxExecutor}（通过 ProcessBuilder 调 docker CLI，零新依赖）。
+     * Docker 不可用时由 {@link com.quant.agent.application.sandbox.SandboxService} 返回基础设施错误。
+     *
+     * @param properties 沙盒配置（镜像名等；缺失时用默认值 python:3.11-slim）
+     */
+    @Bean
+    public SandboxExecutor sandboxExecutor(SandboxProperties properties) {
+        return new DockerSandboxExecutor(properties.image());
+    }
+
+    /**
+     * Day 11：SandboxService Bean —— 沙盒执行应用服务（策略校验 + 编排）。
+     */
+    @Bean
+    public SandboxService sandboxService(SandboxExecutor sandboxExecutor) {
+        return new SandboxService(sandboxExecutor);
+    }
+
+    /**
+     * Day 11：SandboxTaskHandler Bean —— SANDBOX 类型任务的 Handler（自动注册进 ExecutorNode）。
+     */
+    @Bean
+    public SandboxTaskHandler sandboxTaskHandler(SandboxService sandboxService) {
+        return new SandboxTaskHandler(sandboxService);
     }
 
     /**

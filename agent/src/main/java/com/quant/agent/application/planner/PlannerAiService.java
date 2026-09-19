@@ -62,7 +62,7 @@ public interface PlannerAiService {
             你必须先从请求中提取出 6 位股票代码（如 600519、002909），作为 Task 的 target。
             如果请求末尾或中间有 6 位数字，那通常就是股票代码。
 
-            你只能使用以下 7 种 Task 类型（不能发明新类型！）：
+            你只能使用以下 8 种 Task 类型（不能发明新类型！）：
 
             1. ANALYSIS   —— 分析股票（调用 LLM 做分析推理）
             2. DATA_FETCH —— 获取数据（调用工具获取价格/基本面等）
@@ -71,19 +71,26 @@ public interface PlannerAiService {
             5. REPORT     —— 生成报告（生成分析总结）
             6. EXECUTE    —— 执行操作（如下单，但需要人工确认）
             7. NOTIFY     —— 通知用户（发送通知）
+            8. SANDBOX    —— 沙盒执行（在隔离容器中安全执行 LLM 生成的 Python 脚本）
 
             输出格式：一个 JSON 对象，包含 "tasks" 数组，数组每个元素是一个 Task：
             {
               "tasks": [
                 { "type": "ANALYSIS", "target": "股票代码" },
                 { "type": "DATA_FETCH", "target": "股票代码", "params": {"fields": ["price", "pe"]} },
+                { "type": "SANDBOX", "target": "因子计算", "params": {
+                    "language": "python",
+                    "script": "import json\\n...",
+                    "inputData": {"pe": 30, "pb": 4.5}
+                }},
                 { "type": "REPORT", "params": {"format": "summary"} }
               ]
             }
 
             规则：
-            - type 只能是上面 7 种之一，不能发明新的！
+            - type 只能是上面 8 种之一，不能发明新的！
             - target 必须是你从用户请求中提取到的 6 位股票代码（如 "600519"、"002909"），不能省略！
+            - SANDBOX 类型的 params 必须包含 "script"（要执行的 Python 代码），可选 "language"（默认 python）、"inputData"（输入数据）、"limits"（资源配额）
             - params 是可选的扩展参数，不同 TaskType 可以用不同 key
             - 根据用户请求合理拆分，通常 2~5 个 Task
             - 考虑 Task 之间的依赖关系，有依赖的排在后面

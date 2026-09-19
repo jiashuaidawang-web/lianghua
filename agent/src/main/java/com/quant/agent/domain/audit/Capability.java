@@ -60,6 +60,7 @@ public record Capability(
         FILTER,     // 筛选类
         REPORT,     // 报告类
         MCP_REMOTE, // 远端 MCP 工具（类型未知时的兜底）
+        SANDBOX,    // 沙盒执行类（Day 11：容器隔离执行 LLM 生成的代码）
         UNKNOWN     // 未知类型
     }
 

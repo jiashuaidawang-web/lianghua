@@ -150,9 +150,9 @@ public class DiffAuditService {
         if (task.type() == TaskType.NOTIFY) {
             return cap.type() == Capability.CapabilityType.NOTIFY;
         }
-        // FILTER 任务：看有没有筛选能力
-        if (task.type() == TaskType.FILTER) {
-            return cap.type() == Capability.CapabilityType.FILTER;
+        // SANDBOX 任务：看有没有沙盒执行能力（Day 11）
+        if (task.type() == TaskType.SANDBOX) {
+            return cap.type() == Capability.CapabilityType.SANDBOX;
         }
         return false;
     }

@@ -6,3 +6,6 @@ quant:
     api-key: ak_2n14Hu0Um6ge3nj40d6zL5fl6Kr2s
     base-url: https://api.longcat.chat/openai
     model-name: LongCat-2.0
+  # Day 11：沙盒配置。镜像可改为内网私有仓库；Docker CLI 需安装并在 PATH 中。
+  sandbox:
+    image: python:3.11-slim

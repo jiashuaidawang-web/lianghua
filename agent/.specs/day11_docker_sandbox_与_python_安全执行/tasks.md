@@ -1,13 +1,13 @@
 # Day 11 Tasks
 
-- [ ] Confirm current API from official docs/Javadoc.
-- [ ] Implement domain contract.
-- [ ] Implement infrastructure adapter/node/tool.
-- [ ] Wire the application path.
-- [ ] Add normal-path JUnit 5 test.
-- [ ] Add error/boundary JUnit 5 test.
-- [ ] Run `mvn test`.
-- [ ] Update README/checklist with observed results.
+- [x] Confirm current API from official docs/Javadoc.
+- [x] Implement domain contract (SandboxLimits, SandboxResult).
+- [x] Implement infrastructure adapter/node/tool (SandboxPolicy, SandboxService, SandboxExecutor, DockerSandboxExecutor, SandboxProperties, SandboxTaskHandler).
+- [x] Wire the application path (AiServicesConfiguration + TaskType.SANDBOX + CapabilityType.SANDBOX + DiffAuditService + PlannerAiService).
+- [x] Add normal-path JUnit 5 test (SandboxServiceTest, SandboxTaskHandlerTest happy path).
+- [x] Add error/boundary JUnit 5 test (SandboxPolicyTest 黑名单/长度/大小写; Service 策略拒绝/超时/语言错误/配额缺省; Handler 缺script/危险脚本/配额解析/异常兜底).
+- [x] Run `mvn -o test` → BUILD SUCCESS, 133 tests / 0 failures / 0 errors.
+- [x] Update README/checklist with observed results.
 
 ## Vertical Evolution Contract
 
