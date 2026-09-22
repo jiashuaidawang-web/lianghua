@@ -8,6 +8,7 @@ import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
 import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
+import com.quant.agent.graph.nodes.SocraticDiagnosticNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.CompileConfig;
@@ -91,6 +92,9 @@ public class QuantAgentStateGraph {
     // Day 10 节点
     public static final String DIFF_AUDIT = "diffAudit";
 
+    // Day 12 节点
+    public static final String SOCRATIC_DIAGNOSTIC = "socraticDiagnostic";
+
     // -------------------------------------------------------------------------
     // Day 6：终止策略参数（重规划上限）
     // -------------------------------------------------------------------------
@@ -154,6 +158,7 @@ public class QuantAgentStateGraph {
     private ReviewNode day5ReviewNode;
     private RenderNode day5RenderNode;
     private DiffAuditNode day5DiffAuditNode;
+    private SocraticDiagnosticNode day5SocraticDiagnosticNode;
 
     /**
      * Day 5 构造器：注入 Day 5 的四个节点。
@@ -169,19 +174,34 @@ public class QuantAgentStateGraph {
     }
 
     /**
-     * Day 10 构造器：注入五个节点（新增 DiffAuditNode）。
+     * Day 12 构造器：注入六个节点（新增 SocraticDiagnosticNode）。
      *
-     * <p>拓扑：planner → executor → review → diffAudit →(pass)→ render → END
-     *                                               →(fail)→ END
+     * <p>拓扑：planner → executor → review ──[fail]──→ socraticDiagnostic ──[retryable]──→ planner
+     *                                                                   ──[需人工]──→ END
+     *              ──[pass]──→ diffAudit ──[pass]──→ render → END
+     *                                               ──[fail]──→ END
      */
     public QuantAgentStateGraph(PlannerNode plannerNode, ExecutorNode executorNode,
                                  ReviewNode reviewNode, RenderNode renderNode,
-                                 DiffAuditNode diffAuditNode) {
+                                 DiffAuditNode diffAuditNode,
+                                 SocraticDiagnosticNode socraticDiagnosticNode) {
         this.day5PlannerNode = plannerNode;
         this.day5ExecutorNode = executorNode;
         this.day5ReviewNode = reviewNode;
         this.day5RenderNode = renderNode;
         this.day5DiffAuditNode = diffAuditNode;
+        this.day5SocraticDiagnosticNode = socraticDiagnosticNode;
+    }
+
+    /**
+     * Day 10 兼容构造器：注入五个节点（无 SocraticDiagnosticNode，用于测试/旧调用）。
+     *
+     * <p>等价于传入 socraticDiagnosticNode = null。
+     */
+    public QuantAgentStateGraph(PlannerNode plannerNode, ExecutorNode executorNode,
+                                 ReviewNode reviewNode, RenderNode renderNode,
+                                 DiffAuditNode diffAuditNode) {
+        this(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode, null);
     }
 
     /**
@@ -225,6 +245,11 @@ public class QuantAgentStateGraph {
             graph.addNode(DIFF_AUDIT, AsyncNodeAction.node_async(day5DiffAuditNode::apply));
         }
 
+        // Day 12：注册 SocraticDiagnosticNode（如果注入了的话）
+        if (day5SocraticDiagnosticNode != null) {
+            graph.addNode(SOCRATIC_DIAGNOSTIC, AsyncNodeAction.node_async(day5SocraticDiagnosticNode::apply));
+        }
+
         // 固定边：START→planner, planner→executor, executor→review, render→END
         graph.addEdge(START, PLANNER);
         graph.addEdge(PLANNER, EXECUTOR);
@@ -232,12 +257,13 @@ public class QuantAgentStateGraph {
         graph.addEdge(RENDER, END);
 
         // -----------------------------------------------------------------
-        // 条件边：reviewNode 之后的"智能岔口"（重规划循环 + 终止策略 + 差分审计）
+        // 条件边：reviewNode 之后的"智能岔口"（重规划循环 + 终止策略 + 差分审计 + Socratic 诊断）
         // -----------------------------------------------------------------
         // Day 6 改动：终止策略从 reviewNode 移到条件边路由函数。
         // Day 10 改动：review 不再直接决定 END/render，而是决定 重规划/diffAudit/render。
-        //   - 有 diffAudit 节点：pass → diffAudit，fail → planner，超限 → END
-        //   - 无 diffAudit 节点（兼容 Day 5）：pass → render，fail → planner，超限 → END
+        // Day 12 改动：review fail 时先走 SocraticDiagnosticNode 诊断，再决定下一步。
+        //   - 有 socraticDiagnostic 节点：fail → socraticDiagnostic，pass → diffAudit/render
+        //   - 无 socraticDiagnostic 节点（兼容 Day 10）：pass → diffAudit/render，fail → planner
         // 注意：路由表必须动态构建，只包含实际注册的节点（避免 LangGraph4j "not existent nodeId" 错误）。
         java.util.Map<String, String> reviewRouteMap = new java.util.HashMap<>();
         reviewRouteMap.put(RENDER, RENDER);
@@ -245,6 +271,9 @@ public class QuantAgentStateGraph {
         reviewRouteMap.put(END, END);
         if (day5DiffAuditNode != null) {
             reviewRouteMap.put(DIFF_AUDIT, DIFF_AUDIT);
+        }
+        if (day5SocraticDiagnosticNode != null) {
+            reviewRouteMap.put(SOCRATIC_DIAGNOSTIC, SOCRATIC_DIAGNOSTIC);
         }
         graph.addConditionalEdges(
                 REVIEW,
@@ -255,20 +284,33 @@ public class QuantAgentStateGraph {
                         return END;
                     }
                     boolean pass = state.reviewPassed();
-                    if (day5DiffAuditNode != null) {
-                        // Day 10：有 diffAudit，pass → diffAudit，fail → planner
-                        String route = pass ? DIFF_AUDIT : PLANNER;
-                        log.debug("Day10 条件边路由: reviewPassed={} → {}", pass, route);
+                    if (pass) {
+                        // pass → diffAudit（有）or render（无）
+                        String route = (day5DiffAuditNode != null) ? DIFF_AUDIT : RENDER;
+                        log.debug("Day5 条件边路由: reviewPassed={} → {}", pass, route);
                         return route;
                     } else {
-                        // Day 5 兼容：pass → render，fail → planner
-                        String route = pass ? RENDER : PLANNER;
-                        log.debug("Day5 条件边路由: reviewPassed={} → {}", pass, route);
+                        // fail → socraticDiagnostic（有）or planner（无，兼容旧）
+                        String route = (day5SocraticDiagnosticNode != null) ? SOCRATIC_DIAGNOSTIC : PLANNER;
+                        log.debug("Day12 条件边路由: reviewPassed={} → 诊断", pass);
                         return route;
                     }
                 }),
                 reviewRouteMap
         );
+
+        // Day 12：socraticDiagnostic 之后的路由（retryable → planner，否则 → END）
+        if (day5SocraticDiagnosticNode != null) {
+            graph.addConditionalEdges(
+                    SOCRATIC_DIAGNOSTIC,
+                    AsyncEdgeAction.edge_async(state -> {
+                        boolean retryable = routeByDiagnosis(state);
+                        log.debug("Day12 socraticDiagnostic 路由: retryable={} → {}", retryable, retryable ? PLANNER : END);
+                        return retryable ? PLANNER : END;
+                    }),
+                    Map.of(PLANNER, PLANNER, END, END)
+            );
+        }
 
         // Day 10：diffAudit 之后的路由（pass → render，fail → END）
         if (day5DiffAuditNode != null) {
@@ -296,9 +338,35 @@ public class QuantAgentStateGraph {
     /**
      * Day 5 编译（无 Checkpoint，兼容旧调用）。
      *
-     * <p>保留无参版本，方便不需要快照的场景（如简单测试）。
+     * <p>保留无参版本，方便不需要诊断的场景（如简单测试）。
      */
     public CompiledGraph<QuantAgentState> compileDay5() throws GraphStateException {
         return compileDay5(new org.bsc.langgraph4j.checkpoint.MemorySaver());
+    }
+
+    // ========================================================================
+    // Day 12：Socratic 诊断路由逻辑（Java 确定性）
+    // ========================================================================
+
+    /**
+     * 根据诊断结果决定是否可自动重规划。
+     *
+     * <p>规则（deterministic）：
+     * <ul>
+     *   <li>category ∈ {DATA, ENVIRONMENT} 且 confidence ≥ 0.7 → 可重规划</li>
+     *   <li>否则（STRATEGY/CODE 或 低置信） → 进 HITL（返回 false）</li>
+     * </ul>
+     *
+     * @param state 当前状态（含 diagnosisResult）
+     * @return true = 可重规划；false = 进 HITL
+     */
+    private boolean routeByDiagnosis(QuantAgentState state) {
+        com.quant.agent.domain.diagnosis.DiagnosisResult result = state.diagnosisResult();
+        boolean retryable = result != null && result.isRetryable();
+        log.debug("routeByDiagnosis: category={}, confidence={}, retryable={}",
+                result != null ? result.category() : null,
+                result != null ? result.confidence() : 0.0,
+                retryable);
+        return retryable;
     }
 }

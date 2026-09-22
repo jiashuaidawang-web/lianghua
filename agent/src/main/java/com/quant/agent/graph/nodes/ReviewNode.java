@@ -81,6 +81,19 @@ public class ReviewNode {
 
         // 写 REVIEW_RESULT：条件边据此决定走 END 还是 PlannerNode
         updates.put(StateKeys.REVIEW_RESULT, reviewResult);
+
+        // -------------------------------------------------------------------------
+        // Day 12 改动：fail 时写 symptom，供下游 SocraticDiagnosticNode 归因诊断
+        // -------------------------------------------------------------------------
+        if (hasFailure) {
+            String symptom = results.values().stream()
+                    .filter(r -> r != null && r.contains("失败"))
+                    .findFirst()
+                    .orElse("执行失败");
+            updates.put(StateKeys.SYMPTOM, symptom);
+            log.info("审查不通过，写入 symptom 供诊断: {}", symptom);
+        }
+
         return updates;
     }
 }

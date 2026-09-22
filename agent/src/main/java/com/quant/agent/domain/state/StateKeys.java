@@ -82,4 +82,17 @@ public final class StateKeys {  // final：禁止继承
 
     /** DiffAuditNode 的审计是否通过（boolean） */
     public static final String AUDIT_PASSED = "auditPassed";
+
+    // ========================================================================
+    // Day 12 新增：SocraticDiagnosticNode 使用的 key
+    // ========================================================================
+
+    /** 异常症状（String，ReviewNode 写入，SocraticDiagnosticNode 读取） */
+    public static final String SYMPTOM = "symptom";
+
+    /** Socratic 诊断结果（DiagnosisResult，SocraticDiagnosticNode 写入） */
+    public static final String DIAGNOSIS_RESULT = "diagnosisResult";
+
+    /** 诊断状态（String，SocraticDiagnosticNode 写入） */
+    public static final String DIAGNOSIS_STATUS = "diagnosisStatus";
 }

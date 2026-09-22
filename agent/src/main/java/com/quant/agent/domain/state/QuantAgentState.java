@@ -167,4 +167,27 @@ public class QuantAgentState extends AgentState {
     public boolean auditPassed() {
         return Boolean.TRUE.equals(value(StateKeys.AUDIT_PASSED).orElse(false));
     }
+
+    // ========================================================================
+    // Day 12 新增 accessor（SocraticDiagnosticNode 使用的字段）
+    // ========================================================================
+
+    /** ReviewNode 写入的异常症状（SocraticDiagnosticNode 读取） */
+    @SuppressWarnings("unchecked")
+    public String symptom() {
+        return (String) value(StateKeys.SYMPTOM).orElse(null);
+    }
+
+    /** SocraticDiagnosticNode 写入的诊断结果 */
+    @SuppressWarnings("unchecked")
+    public com.quant.agent.domain.diagnosis.DiagnosisResult diagnosisResult() {
+        return (com.quant.agent.domain.diagnosis.DiagnosisResult) value(StateKeys.DIAGNOSIS_RESULT)
+                .orElse(com.quant.agent.domain.diagnosis.DiagnosisResult.EMPTY);
+    }
+
+    /** SocraticDiagnosticNode 写入的诊断状态 */
+    @SuppressWarnings("unchecked")
+    public String diagnosisStatus() {
+        return (String) value(StateKeys.DIAGNOSIS_STATUS).orElse("PENDING");
+    }
 }

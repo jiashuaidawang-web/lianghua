@@ -2,6 +2,7 @@ package com.quant.agent.infrastructure.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.agent.application.audit.DiffAuditService;
+import com.quant.agent.application.diagnosis.SocraticDiagnoser;
 import com.quant.agent.application.sandbox.SandboxService;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
@@ -29,6 +30,7 @@ import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
 import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
+import com.quant.agent.graph.nodes.SocraticDiagnosticNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import com.quant.agent.graph.runtime.GraphRunner;
 import com.quant.agent.graph.topology.QuantAgentStateGraph;
@@ -247,14 +249,16 @@ public class AiServicesConfiguration {
     // ---- 第 2 层：图（把节点连起来）---------------------------------
     // Day 5 重构图拓扑：planner → executor → review →(pass→render→END / fail→planner)
     // Day 10 改动：review 之后插入 diffAudit 节点
+    // Day 12 改动：review fail 时先走 socraticDiagnostic 节点诊断
 
     @Bean
     public QuantAgentStateGraph quantAgentStateGraphDay5(PlannerNode plannerNode,
                                                          ExecutorNode executorNode,
                                                          ReviewNode reviewNode,
                                                          RenderNode renderNode,
-                                                         DiffAuditNode diffAuditNode) {
-        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode);
+                                                         DiffAuditNode diffAuditNode,
+                                                         SocraticDiagnosticNode socraticDiagnosticNode) {
+        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode, socraticDiagnosticNode);
     }
 
     // ---- 第 3 层：Day 5 运行入口（PlannerController 依赖此 Bean，名为 graphRunnerDay5）----
@@ -323,6 +327,30 @@ public class AiServicesConfiguration {
     @Bean
     public SandboxTaskHandler sandboxTaskHandler(SandboxService sandboxService) {
         return new SandboxTaskHandler(sandboxService);
+    }
+
+    // ========================================================================
+    // Day 12：Socratic Diagnosis —— 苏格拉底式归因诊断
+    // ========================================================================
+
+    /**
+     * Day 12：SocraticDiagnoser Bean —— 拼 prompt + 调 LLM + 校验产出 DiagnosisResult。
+     *
+     * <p>注入 plainChatLanguageModel（无 Schema 约束，因为诊断输出结构由 prompt 控制），
+     * 和 ObjectMapper（JSON 解析用）。
+     */
+    @Bean
+    public SocraticDiagnoser socraticDiagnoser(ChatModel plainChatLanguageModel,
+                                                ObjectMapper objectMapper) {
+        return new SocraticDiagnoser(plainChatLanguageModel, objectMapper);
+    }
+
+    /**
+     * Day 12：SocraticDiagnosticNode Bean —— Socratic 诊断节点（接入图的"诊断专家"）。
+     */
+    @Bean
+    public SocraticDiagnosticNode socraticDiagnosticNode(SocraticDiagnoser socraticDiagnoser) {
+        return new SocraticDiagnosticNode(socraticDiagnoser);
     }
 
     /**
