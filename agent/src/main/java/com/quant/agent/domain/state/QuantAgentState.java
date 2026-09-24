@@ -167,4 +167,15 @@ public class QuantAgentState extends AgentState {
     public boolean auditPassed() {
         return Boolean.TRUE.equals(value(StateKeys.AUDIT_PASSED).orElse(false));
     }
+
+    // ========================================================================
+    // Day 12 新增 accessor（DiagnosisNode 使用的字段）
+    // ========================================================================
+
+    /** DiagnosisNode 的归因诊断（无诊断时返回 HEALTHY） */
+    @SuppressWarnings("unchecked")
+    public com.quant.agent.domain.diagnosis.Diagnosis diagnosis() {
+        return (com.quant.agent.domain.diagnosis.Diagnosis) value(StateKeys.DIAGNOSIS)
+                .orElse(com.quant.agent.domain.diagnosis.Diagnosis.HEALTHY);
+    }
 }

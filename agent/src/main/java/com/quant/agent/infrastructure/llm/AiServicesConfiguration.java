@@ -2,6 +2,13 @@ package com.quant.agent.infrastructure.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.agent.application.audit.DiffAuditService;
+import com.quant.agent.application.diagnosis.DataMissingStrategy;
+import com.quant.agent.application.diagnosis.DiagnosisService;
+import com.quant.agent.application.diagnosis.DiagnosisStrategy;
+import com.quant.agent.application.diagnosis.ExecutionErrorStrategy;
+import com.quant.agent.application.diagnosis.HealthyStrategy;
+import com.quant.agent.application.diagnosis.RiskTriggerStrategy;
+import com.quant.agent.application.diagnosis.SandboxFailureStrategy;
 import com.quant.agent.application.sandbox.SandboxService;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
@@ -23,6 +30,7 @@ import com.quant.agent.infrastructure.tool.MarketDataCache;
 import com.quant.agent.infrastructure.tool.MarketDataGateway;
 import com.quant.agent.infrastructure.tool.RateLimiter;
 import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.DiagnosisNode;
 import com.quant.agent.graph.nodes.DiffAuditNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
@@ -247,14 +255,16 @@ public class AiServicesConfiguration {
     // ---- 第 2 层：图（把节点连起来）---------------------------------
     // Day 5 重构图拓扑：planner → executor → review →(pass→render→END / fail→planner)
     // Day 10 改动：review 之后插入 diffAudit 节点
+    // Day 12 改动：executor 之后插入 diagnosis 节点
 
     @Bean
     public QuantAgentStateGraph quantAgentStateGraphDay5(PlannerNode plannerNode,
                                                          ExecutorNode executorNode,
                                                          ReviewNode reviewNode,
                                                          RenderNode renderNode,
-                                                         DiffAuditNode diffAuditNode) {
-        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode);
+                                                         DiffAuditNode diffAuditNode,
+                                                         DiagnosisNode diagnosisNode) {
+        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode, diagnosisNode);
     }
 
     // ---- 第 3 层：Day 5 运行入口（PlannerController 依赖此 Bean，名为 graphRunnerDay5）----
@@ -323,6 +333,54 @@ public class AiServicesConfiguration {
     @Bean
     public SandboxTaskHandler sandboxTaskHandler(SandboxService sandboxService) {
         return new SandboxTaskHandler(sandboxService);
+    }
+
+    // ========================================================================
+    // Day 12：Socratic Diagnosis —— 归因诊断（证据→归因→推荐动作）
+    // ========================================================================
+
+    /**
+     * Day 12：5 个归因 Strategy（每个自动注入到 DiagnosisService）。
+     */
+    @Bean
+    public DataMissingStrategy dataMissingStrategy() {
+        return new DataMissingStrategy();
+    }
+
+    @Bean
+    public SandboxFailureStrategy sandboxFailureStrategy() {
+        return new SandboxFailureStrategy();
+    }
+
+    @Bean
+    public RiskTriggerStrategy riskTriggerStrategy() {
+        return new RiskTriggerStrategy();
+    }
+
+    @Bean
+    public ExecutionErrorStrategy executionErrorStrategy() {
+        return new ExecutionErrorStrategy();
+    }
+
+    @Bean
+    public HealthyStrategy healthyStrategy() {
+        return new HealthyStrategy();
+    }
+
+    /**
+     * Day 12：DiagnosisService Bean —— 决策树 + Strategy 编排。
+     */
+    @Bean
+    public DiagnosisService diagnosisService(List<DiagnosisStrategy> strategies) {
+        return new DiagnosisService(strategies);
+    }
+
+    /**
+     * Day 12：DiagnosisNode Bean —— 归因诊断节点（插入 executor 与 review 之间）。
+     */
+    @Bean
+    public DiagnosisNode diagnosisNode(DiagnosisService diagnosisService) {
+        return new DiagnosisNode(diagnosisService);
     }
 
     /**

@@ -1,14 +1,7 @@
 package com.quant.agent.graph.topology;
 
 import com.quant.agent.domain.state.QuantAgentState;
-import com.quant.agent.graph.nodes.AnalysisNode;
-import com.quant.agent.graph.nodes.DiffAuditNode;
-import com.quant.agent.graph.nodes.ExecutorNode;
-import com.quant.agent.graph.nodes.OutputNode;
-import com.quant.agent.graph.nodes.PlannerNode;
-import com.quant.agent.graph.nodes.RenderNode;
-import com.quant.agent.graph.nodes.ReviewNode;
-import com.quant.agent.graph.nodes.ToolNode;
+import com.quant.agent.graph.nodes.*;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.CompileConfig;
 import org.bsc.langgraph4j.GraphStateException;
@@ -20,7 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
-import java.util.Optional;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
@@ -91,6 +83,9 @@ public class QuantAgentStateGraph {
     // Day 10 节点
     public static final String DIFF_AUDIT = "diffAudit";
 
+    // Day 12 节点
+    public static final String DIAGNOSIS = "diagnosis";
+
     // -------------------------------------------------------------------------
     // Day 6：终止策略参数（重规划上限）
     // -------------------------------------------------------------------------
@@ -154,6 +149,7 @@ public class QuantAgentStateGraph {
     private ReviewNode day5ReviewNode;
     private RenderNode day5RenderNode;
     private DiffAuditNode day5DiffAuditNode;
+    private DiagnosisNode day5DiagnosisNode;
 
     /**
      * Day 5 构造器：注入 Day 5 的四个节点。
@@ -182,6 +178,20 @@ public class QuantAgentStateGraph {
         this.day5ReviewNode = reviewNode;
         this.day5RenderNode = renderNode;
         this.day5DiffAuditNode = diffAuditNode;
+    }
+
+    /**
+     * Day 12 构造器：注入六个节点（新增 DiagnosisNode）。
+     *
+     * <p>拓扑：planner → executor → diagnosis →[HEALTHY]→ review → diffAudit → render → END
+     *                                   →[ANOMALY]→ render(diagnosis) → END
+     */
+    public QuantAgentStateGraph(PlannerNode plannerNode, ExecutorNode executorNode,
+                                 ReviewNode reviewNode, RenderNode renderNode,
+                                 DiffAuditNode diffAuditNode,
+                                 DiagnosisNode diagnosisNode) {
+        this(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode);
+        this.day5DiagnosisNode = diagnosisNode;
     }
 
     /**
@@ -225,11 +235,46 @@ public class QuantAgentStateGraph {
             graph.addNode(DIFF_AUDIT, AsyncNodeAction.node_async(day5DiffAuditNode::apply));
         }
 
+        // Day 12：注册 DiagnosisNode（如果注入了的话）
+        if (day5DiagnosisNode != null) {
+            graph.addNode(DIAGNOSIS, AsyncNodeAction.node_async(day5DiagnosisNode::apply));
+        }
+
         // 固定边：START→planner, planner→executor, executor→review, render→END
         graph.addEdge(START, PLANNER);
         graph.addEdge(PLANNER, EXECUTOR);
-        graph.addEdge(EXECUTOR, REVIEW);
         graph.addEdge(RENDER, END);
+
+        // Day 12：executor 之后、review 之前插入 diagnosis 节点
+        //   - 有 diagnosis 节点：executor → diagnosis，再由 diagnosis 条件边决定走 review 还是 render
+        //   - 无 diagnosis 节点（兼容 Day 5/10）：保持 executor → review
+        if (day5DiagnosisNode != null) {
+            graph.addEdge(EXECUTOR, DIAGNOSIS);
+        } else {
+            graph.addEdge(EXECUTOR, REVIEW);
+        }
+
+        // -----------------------------------------------------------------
+        // Day 12：diagnosis 节点之后的"归因岔口"
+        // -----------------------------------------------------------------
+        // HEALTHY → review（走原审查流程）
+        // ANOMALY → render（展示诊断报告，跳过盲目重规划）
+        // 注意：路由表必须动态构建，只包含实际注册的节点。
+        if (day5DiagnosisNode != null) {
+            java.util.Map<String, String> diagnosisRouteMap = new java.util.HashMap<>();
+            diagnosisRouteMap.put(REVIEW, REVIEW);
+            diagnosisRouteMap.put(RENDER, RENDER);
+            graph.addConditionalEdges(
+                    DIAGNOSIS,
+                    AsyncEdgeAction.edge_async(state -> {
+                        boolean anomaly = state.diagnosis() != null && state.diagnosis().isAnomaly();
+                        String route = anomaly ? RENDER : REVIEW;
+                        log.debug("Day12 diagnosis 路由: anomaly={} → {}", anomaly, route);
+                        return route;
+                    }),
+                    diagnosisRouteMap
+            );
+        }
 
         // -----------------------------------------------------------------
         // 条件边：reviewNode 之后的"智能岔口"（重规划循环 + 终止策略 + 差分审计）

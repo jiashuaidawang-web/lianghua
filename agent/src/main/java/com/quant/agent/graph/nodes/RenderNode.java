@@ -1,6 +1,8 @@
 package com.quant.agent.graph.nodes;
 
 import com.quant.agent.application.render.RenderAiService;
+import com.quant.agent.domain.diagnosis.Diagnosis;
+import com.quant.agent.domain.diagnosis.Hypothesis;
 import com.quant.agent.domain.state.QuantAgentState;
 import com.quant.agent.domain.state.StateKeys;
 import org.slf4j.Logger;
@@ -80,6 +82,18 @@ public class RenderNode {
         Map<String, String> results = state.results();
         String rendered;
 
+        // -------------------------------------------------------------------------
+        // Day 12：有异常诊断时，优先渲染诊断报告（证据→归因→推荐动作），不再渲染原始 results
+        // -------------------------------------------------------------------------
+        Diagnosis diagnosis = state.diagnosis();
+        if (diagnosis != null && diagnosis.isAnomaly()) {
+            rendered = renderDiagnosis(diagnosis);
+            log.info("renderNode 渲染诊断报告: category={}", diagnosis.category());
+            Map<String, Object> updates = new HashMap<>();
+            updates.put(StateKeys.RENDERED_RESULT, rendered);
+            return updates;
+        }
+
         try {
             // -----------------------------------------------------------------
             // 步骤 1：把 results map 拼成 LLM 能消化的文本 payload
@@ -115,5 +129,43 @@ public class RenderNode {
         // 写入 RENDERED_RESULT —— Day 5 图的"终点产物"（给人看的版本）
         updates.put(StateKeys.RENDERED_RESULT, rendered);
         return updates;
+    }
+
+    /**
+     * Day 12：把 Diagnosis 渲染成人类可读的"证据→归因→推荐动作"报告。
+     *
+     * <p>纯确定性字符串拼接，不调 LLM（诊断报告必须稳定可审计）。
+     */
+    private String renderDiagnosis(Diagnosis diagnosis) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("【诊断报告】\n");
+        sb.append("归因类别: ").append(diagnosis.category()).append("\n");
+        sb.append("整体判断: ").append(diagnosis.summary()).append("\n");
+        sb.append("可信度: ").append(diagnosis.confidence()).append("\n\n");
+
+        sb.append("—— 假说（按可信度排序） ——\n");
+        if (diagnosis.hypotheses().isEmpty()) {
+            sb.append("（无具体假说）\n");
+        } else {
+            for (Hypothesis h : diagnosis.hypotheses()) {
+                sb.append("[").append(h.likelihood()).append("] ").append(h.id())
+                        .append(" ").append(h.description()).append("\n");
+                if (h.evidence() != null && !h.evidence().isEmpty()) {
+                    sb.append("    证据: ");
+                    sb.append(String.join(" | ", h.evidence())).append("\n");
+                }
+            }
+        }
+
+        sb.append("\n—— 推荐动作 ——\n");
+        if (diagnosis.recommendedActions().isEmpty()) {
+            sb.append("（无）\n");
+        } else {
+            int n = 1;
+            for (String action : diagnosis.recommendedActions()) {
+                sb.append(n++).append(". ").append(action).append("\n");
+            }
+        }
+        return sb.toString();
     }
 }
