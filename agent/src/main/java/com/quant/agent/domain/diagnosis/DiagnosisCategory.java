@@ -1,74 +1,76 @@
 package com.quant.agent.domain.diagnosis;
 
 // ============================================================================================
-// 【Day 12 · 阅读入口】DiagnosisCategory —— 诊断类别的"枚举围栏"，Java 确定性边界。
+// 【Day 12 · 阅读入口】DiagnosisCategory —— 归因类别枚举，诊断的"确定性分类结果"。
 // --------------------------------------------------------------------------------------------
-//   在整条链里的位置：Day 12 Socratic 诊断的"分类字典"。
+//   在整条链里的位置：Day 12 诊断能力的分类基石。由 DiagnosisService 的决策树产出，
+//   不由 LLM 猜测（constitution: deterministic policy checks）。
+//   建议阅读时机：Day 12 最先读它。
 //   学完能回答：
-//     1. 为什么 category 必须是枚举，而不能让 LLM 自由输出字符串？
-//     2. fromValue 在校验流程的哪一步被调用？
+//     1. 为什么分类必须确定性、不调 LLM？
+//     2. 严重度顺序是什么？
+//     3. HEALTHY 也算一个类别吗？为什么？
 //
-//   💡 为什么必须是枚举？
-//     LLM 可能输出"策略问题！"（带感叹号）、"策略"（简称）、"strategy"（英文）等变体。
-//     如果允许自由字符串，下游路由.case 匹配会漏掉这些变体 → 误判。
-//     枚举强制"只能这四个值"，LLM 输出不在枚举里 → 校验失败 → 进人工。
+//   💡 为什么分类必须确定性？
+//     "这个问题严不严重"是事实判断，不是观点判断——不能靠 LLM 猜。
+//     LLM 会"护犊子"：让它判断自己产出的任务失败有多严重 → 倾向说"不严重"。
+//     所以分类由 Java 决策树完成，可审计、可单测、行为确定。
 //
-//   💡 四个类别的工程含义：
-//     - DATA：外部数据问题（缺、延迟、格式错）→ 重试可能自动恢复
-//     - STRATEGY：策略逻辑/参数问题 → 重规划可能重复犯错，必须人工
-//     - CODE：代码 bug / 异常 → 必须人工修复
-//     - ENVIRONMENT：网络/依赖问题 → 重试可能自动恢复
+//   💡 严重度顺序（降序）：
+//     RISK_TRIGGER > SANDBOX_FAILURE > DATA_MISSING > EXECUTION_ERROR > HEALTHY
+//     决策树按此顺序命中即停（见 DiagnosisService）。
 //
-//   ⬇ 下一步：看 SocraticDiagnoser（哪里调 fromValue 做校验）。
+//   💡 HEALTHY 也算类别？
+//     是。它代表"扫描完全部证据，未发现异常"，是决策树的正常终止状态。
+//     把它显式建模为枚举，比用 null 表示"没异常"更安全（避免 NPE）。
+//
+//   ⬇ 下一步：看 Diagnosis（DiagnosisCategory 是它的一个字段）。
 // ============================================================================================
 
 /**
- * 诊断类别：异常归因的四个确定性分类。
+ * 归因类别：诊断的确定性分类结果。
  *
- * <p>LLM 只能输出这四个值之一，否则 Java 校验失败。
+ * <p>由 {@link com.quant.agent.application.diagnosis.DiagnosisService} 的决策树产出，
+ * 不由 LLM 猜测。按严重度降序排列（ordinal 越小越严重，HEALTHY 最轻）。
  */
 public enum DiagnosisCategory {
 
-    /** 数据问题（缺失 / 延迟 / 格式错） */
-    DATA("数据问题"),
-
-    /** 策略问题（逻辑 / 参数） */
-    STRATEGY("策略问题"),
-
-    /** 代码问题（bug / 异常） */
-    CODE("代码问题"),
-
-    /** 环境问题（网络 / 依赖） */
-    ENVIRONMENT("环境问题");
-
-    private final String displayName;
-
-    DiagnosisCategory(String displayName) {
-        this.displayName = displayName;
-    }
-
-    public String displayName() {
-        return displayName;
-    }
+    /**
+     * 风控触发 —— 安全策略拦截（如沙盒脚本命中黑名单）。
+     * <p>最严重：涉及安全红线，必须阻断并告知用户。
+     */
+    RISK_TRIGGER,
 
     /**
-     * 从字符串解析类别（LLM 输出校验用）。
-     *
-     * @param value LLM 输出的 category 字符串
-     * @return 匹配的枚举值
-     * @throws IllegalArgumentException 不在枚举范围内
+     * 沙盒执行失败 —— 超时 / 错误退出。
+     * <p>脚本本身可能合规，但执行环境/资源出了问题。
      */
-    public static DiagnosisCategory fromValue(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("category 不能为空");
-        }
-        String trimmed = value.trim();
-        for (DiagnosisCategory category : values()) {
-            if (category.name().equals(trimmed)) {
-                return category;
-            }
-        }
-        throw new IllegalArgumentException(
-                "非法 category: " + trimmed + "，必须是 DATA/STRATEGY/CODE/ENVIRONMENT 之一");
+    SANDBOX_FAILURE,
+
+    /**
+     * 数据缺失 —— 数据获取失败 / 字段为空 / 超时 / 源不可用。
+     * <p>策略依赖的数据没拿到，继续跑也没意义。
+     */
+    DATA_MISSING,
+
+    /**
+     * 执行错误 —— 通用执行失败兜底（未知类型、未执行、其他异常）。
+     */
+    EXECUTION_ERROR,
+
+    /**
+     * 健康 —— 扫描完全部证据，未发现异常。
+     * <p>正常终止状态，走原流程（review → diffAudit → render）。
+     */
+    HEALTHY;
+
+    /**
+     * 是否需要阻断原流程、进入诊断路径。
+     *
+     * <p>HEALTHY 之外的所有类别都视为异常，应跳过盲目重规划，
+     * 把诊断结果交给用户/HITL 决策。
+     */
+    public boolean isAnomaly() {
+        return this != HEALTHY;
     }
 }

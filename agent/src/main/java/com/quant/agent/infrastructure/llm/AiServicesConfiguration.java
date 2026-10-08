@@ -2,7 +2,14 @@ package com.quant.agent.infrastructure.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.agent.application.audit.DiffAuditService;
-import com.quant.agent.application.diagnosis.SocraticDiagnoser;
+import com.quant.agent.application.diagnosis.DataMissingStrategy;
+import com.quant.agent.application.diagnosis.DiagnosisService;
+import com.quant.agent.application.diagnosis.DiagnosisStrategy;
+import com.quant.agent.application.diagnosis.ExecutionErrorStrategy;
+import com.quant.agent.application.diagnosis.HealthyStrategy;
+import com.quant.agent.application.diagnosis.LlmDeepAnalysisService;
+import com.quant.agent.application.diagnosis.RiskTriggerStrategy;
+import com.quant.agent.application.diagnosis.SandboxFailureStrategy;
 import com.quant.agent.application.sandbox.SandboxService;
 import com.quant.agent.application.llm.StockAnalysisAiService;
 import com.quant.agent.application.llm.StockAnalysisWithToolAiService;
@@ -24,13 +31,13 @@ import com.quant.agent.infrastructure.tool.MarketDataCache;
 import com.quant.agent.infrastructure.tool.MarketDataGateway;
 import com.quant.agent.infrastructure.tool.RateLimiter;
 import com.quant.agent.graph.nodes.AnalysisNode;
+import com.quant.agent.graph.nodes.DiagnosisNode;
 import com.quant.agent.graph.nodes.DiffAuditNode;
 import com.quant.agent.graph.nodes.ExecutorNode;
 import com.quant.agent.graph.nodes.OutputNode;
 import com.quant.agent.graph.nodes.PlannerNode;
 import com.quant.agent.graph.nodes.RenderNode;
 import com.quant.agent.graph.nodes.ReviewNode;
-import com.quant.agent.graph.nodes.SocraticDiagnosticNode;
 import com.quant.agent.graph.nodes.ToolNode;
 import com.quant.agent.graph.runtime.GraphRunner;
 import com.quant.agent.graph.topology.QuantAgentStateGraph;
@@ -249,7 +256,7 @@ public class AiServicesConfiguration {
     // ---- 第 2 层：图（把节点连起来）---------------------------------
     // Day 5 重构图拓扑：planner → executor → review →(pass→render→END / fail→planner)
     // Day 10 改动：review 之后插入 diffAudit 节点
-    // Day 12 改动：review fail 时先走 socraticDiagnostic 节点诊断
+    // Day 12 改动：executor 之后插入 diagnosis 节点
 
     @Bean
     public QuantAgentStateGraph quantAgentStateGraphDay5(PlannerNode plannerNode,
@@ -257,8 +264,8 @@ public class AiServicesConfiguration {
                                                          ReviewNode reviewNode,
                                                          RenderNode renderNode,
                                                          DiffAuditNode diffAuditNode,
-                                                         SocraticDiagnosticNode socraticDiagnosticNode) {
-        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode, socraticDiagnosticNode);
+                                                         DiagnosisNode diagnosisNode) {
+        return new QuantAgentStateGraph(plannerNode, executorNode, reviewNode, renderNode, diffAuditNode, diagnosisNode);
     }
 
     // ---- 第 3 层：Day 5 运行入口（PlannerController 依赖此 Bean，名为 graphRunnerDay5）----
@@ -330,27 +337,68 @@ public class AiServicesConfiguration {
     }
 
     // ========================================================================
-    // Day 12：Socratic Diagnosis —— 苏格拉底式归因诊断
+    // Day 12：Socratic Diagnosis —— 归因诊断（证据→归因→推荐动作）
     // ========================================================================
 
     /**
-     * Day 12：SocraticDiagnoser Bean —— 拼 prompt + 调 LLM + 校验产出 DiagnosisResult。
-     *
-     * <p>注入 plainChatLanguageModel（无 Schema 约束，因为诊断输出结构由 prompt 控制），
-     * 和 ObjectMapper（JSON 解析用）。
+     * Day 12：5 个归因 Strategy（每个自动注入到 DiagnosisService）。
      */
     @Bean
-    public SocraticDiagnoser socraticDiagnoser(ChatModel plainChatLanguageModel,
-                                                ObjectMapper objectMapper) {
-        return new SocraticDiagnoser(plainChatLanguageModel, objectMapper);
+    public DataMissingStrategy dataMissingStrategy() {
+        return new DataMissingStrategy();
+    }
+
+    @Bean
+    public SandboxFailureStrategy sandboxFailureStrategy() {
+        return new SandboxFailureStrategy();
+    }
+
+    @Bean
+    public RiskTriggerStrategy riskTriggerStrategy() {
+        return new RiskTriggerStrategy();
+    }
+
+    @Bean
+    public ExecutionErrorStrategy executionErrorStrategy() {
+        return new ExecutionErrorStrategy();
+    }
+
+    @Bean
+    public HealthyStrategy healthyStrategy() {
+        return new HealthyStrategy();
     }
 
     /**
-     * Day 12：SocraticDiagnosticNode Bean —— Socratic 诊断节点（接入图的"诊断专家"）。
+     * Day 12：DiagnosisService Bean —— 决策树 + Strategy 编排 + LLM 兜底。
+     *
+     * <p>注入 LlmDeepAnalysisService 后，当确定性分析产出 LOW 可信度假说时，
+     * 自动调 LLM 做深度归因补充（分层混合架构）。
      */
     @Bean
-    public SocraticDiagnosticNode socraticDiagnosticNode(SocraticDiagnoser socraticDiagnoser) {
-        return new SocraticDiagnosticNode(socraticDiagnoser);
+    public DiagnosisService diagnosisService(List<DiagnosisStrategy> strategies,
+                                             LlmDeepAnalysisService llmDeepAnalysisService) {
+        return new DiagnosisService(strategies, llmDeepAnalysisService);
+    }
+
+    /**
+     * Day 12：LlmDeepAnalysisService Bean —— LLM 深度归因兜底服务。
+     *
+     * <p>注入 plainChatLanguageModel（无 Schema 约束，输出自由格式 JSON）
+     * + ObjectMapper（JSON 解析用）。
+     * 仅当确定性分析 LOW 可信度时才被调用，大部分已知异常不走 LLM。
+     */
+    @Bean
+    public LlmDeepAnalysisService llmDeepAnalysisService(ChatModel plainChatLanguageModel,
+                                                         ObjectMapper objectMapper) {
+        return new LlmDeepAnalysisService(plainChatLanguageModel, objectMapper);
+    }
+
+    /**
+     * Day 12：DiagnosisNode Bean —— 归因诊断节点（插入 executor 与 review 之间）。
+     */
+    @Bean
+    public DiagnosisNode diagnosisNode(DiagnosisService diagnosisService) {
+        return new DiagnosisNode(diagnosisService);
     }
 
     /**
